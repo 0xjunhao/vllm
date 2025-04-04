@@ -10,7 +10,8 @@ import vllm.envs as envs
 from vllm.attention import get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
                          ParallelConfig, VllmConfig)
-from vllm.distributed import (ensure_model_parallel_initialized,
+from vllm.distributed import (ensure_kv_transfer_initialized,
+                              ensure_model_parallel_initialized,
                               init_distributed_environment)
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
@@ -391,6 +392,8 @@ class CPUWorker(LocalOrDistributedWorkerBase):
         ensure_model_parallel_initialized(
             parallel_config.tensor_parallel_size,
             parallel_config.pipeline_parallel_size)
+
+        ensure_kv_transfer_initialized(self.vllm_config)
 
     def get_cache_block_size_bytes(self) -> int:
         """Return the size in bytes of a single KV cache block.
