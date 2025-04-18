@@ -67,6 +67,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         """
         self.kv_store.close()
 
+    # TODO: Investigate how storage differ between GPU and CPU.
     def send_kv_caches_and_hidden_states(
         self,
         model_executable: torch.nn.Module,
@@ -115,6 +116,17 @@ class MooncakeStoreConnector(KVConnectorBase):
             hidden_key = f"{store_key_prefix}_hidden_{self.local_tp_rank}"
             self.kv_store.put(hidden_key,
                               hidden_or_intermediate_states[start_pos:end_pos])
+
+            print(f"[PUT] key={store_kvcache_key!r}  tensor.dtype={kvcache_to_sent.dtype}  "
+                  f"shape={tuple(kvcache_to_sent.shape)}  contiguous={kvcache_to_sent.is_contiguous()}")
+            flat = kvcache_to_sent.detach().cpu().flatten()
+            sample_vals = flat[:8].tolist()
+            print(f"[PUT] sample kvcache values (first 8): {sample_vals}")
+            print(f"[PUT] key={hidden_key!r}  tensor.dtype={hidden_or_intermediate_states.dtype}  "
+                  f"shape={tuple(hidden_or_intermediate_states.shape)}  contiguous={hidden_or_intermediate_states.is_contiguous()}")
+            slice_h = hidden_or_intermediate_states
+            flat_h = slice_h.detach().cpu().flatten()
+            print(f"[PUT] sample hidden values (first 8): {flat_h[:8].tolist()}")
 
         logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
 
@@ -179,6 +191,30 @@ class MooncakeStoreConnector(KVConnectorBase):
                 remote_k, remote_v = remote_kv[0][layer_id], remote_kv[1][
                     layer_id]
                 # use ops.reshape_and_cache_flash to put kv into kvcache
+
+                if key_cache.device == torch.device('cpu'):
+                    num_tokens, num_heads, head_size = remote_k.shape
+                    n = num_heads * head_size
+                    num_blocks, block_stride = key_cache.shape
+
+                    if block_stride % n != 0:
+                        raise ValueError("block_stride is not a multiple of (num_heads * head_size)")
+                    block_size = block_stride // n
+
+                    key_cache_flat = key_cache.view(-1)
+                    value_cache_flat = value_cache.view(-1)
+                    block_idx = slot_mapping // block_size
+                    block_offset = slot_mapping % block_size
+                    start_idx = block_idx * block_stride + block_offset * n
+                    key_flat_tokens = remote_k.reshape(num_tokens, n)
+                    value_flat_tokens = remote_v.reshape(num_tokens, n)
+
+                    for i in range(num_tokens):
+                        s_idx = int(start_idx[i].item()) if isinstance(start_idx[i], torch.Tensor) else int(start_idx[i])
+                        key_cache_flat[s_idx : s_idx + n] = key_flat_tokens[i]
+                        value_cache_flat[s_idx : s_idx + n] = value_flat_tokens[i]
+
+                    continue
                 ops.reshape_and_cache_flash(
                     remote_k.to(key_cache.device),
                     remote_v.to(value_cache.device),

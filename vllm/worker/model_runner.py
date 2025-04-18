@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 import vllm.envs as envs
 from vllm.attention import AttentionMetadata, get_attn_backend
@@ -1749,6 +1749,22 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                     model_input,
                     kv_caches=kv_caches
                 )
+            if hidden_or_intermediate_states is not None:
+                print(
+                    f"[DEBUG] hidden BEFORE to(): "
+                    f"device={hidden_or_intermediate_states.device}, "
+                    f"shape={tuple(hidden_or_intermediate_states.shape)}, "
+                    f"dtype={hidden_or_intermediate_states.dtype}"
+                )
+                print(self.kv_cache_dtype)
+                print(self.model_config.dtype)
+                hidden_or_intermediate_states = hidden_or_intermediate_states.to(self.device, dtype=self.model_config.dtype,)
+                print(
+                    f"[DEBUG] hidden BEFORE to(): "
+                    f"device={hidden_or_intermediate_states.device}, "
+                    f"shape={tuple(hidden_or_intermediate_states.shape)}, "
+                    f"dtype={hidden_or_intermediate_states.dtype}"
+                )
 
         multi_modal_kwargs = model_input.multi_modal_kwargs or {}
         seqlen_agnostic_kwargs = {
@@ -1776,6 +1792,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                     **seqlen_agnostic_kwargs,
                     **model_kwargs,
                 )
+
 
         if (self.observability_config is not None
                 and self.observability_config.collect_model_forward_time):

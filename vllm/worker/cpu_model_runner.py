@@ -13,6 +13,7 @@ from torch import nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
 from vllm.forward_context import set_forward_context
+from vllm.distributed import get_kv_transfer_group, get_pp_group
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
@@ -641,6 +642,13 @@ class CPUModelRunner(CPUModelRunnerBase[ModelInputForCPUWithSamplingMetadata]):
 
         model_executable = self.model
 
+        bypass_model_exec = False
+        if self.need_recv_kv(model_input, kv_caches):
+            hidden_states, bypass_model_exec, model_input = \
+                get_kv_transfer_group().recv_kv_caches_and_hidden_states(
+                    model_executable, model_input, kv_caches=kv_caches
+                )
+
         multimodal_kwargs = {}
         if model_input.multi_modal_kwargs is not None:
             multimodal_kwargs = MultiModalKwargs.as_kwargs(
@@ -650,14 +658,23 @@ class CPUModelRunner(CPUModelRunnerBase[ModelInputForCPUWithSamplingMetadata]):
             execute_model_kwargs.update(
                 {"previous_hidden_states": previous_hidden_states})
 
-        with set_forward_context(model_input.attn_metadata, self.vllm_config,
-                                 model_input.virtual_engine):
-            hidden_states = model_executable(
-                input_ids=model_input.input_tokens,
-                positions=model_input.input_positions,
-                intermediate_tensors=intermediate_tensors,
-                **execute_model_kwargs,
-                **multimodal_kwargs,
+        if not bypass_model_exec:
+            with set_forward_context(model_input.attn_metadata, self.vllm_config,
+                                     model_input.virtual_engine):
+                hidden_states = model_executable(
+                    input_ids=model_input.input_tokens,
+                    positions=model_input.input_positions,
+                    intermediate_tensors=intermediate_tensors,
+                    **execute_model_kwargs,
+                    **multimodal_kwargs,
+                )
+
+        if self.need_send_kv(model_input, kv_caches):
+            get_kv_transfer_group().send_kv_caches_and_hidden_states(
+                model_executable,
+                model_input,
+                kv_caches,
+                hidden_states
             )
 
         # Compute the logits.
@@ -679,6 +696,28 @@ class CPUModelRunner(CPUModelRunnerBase[ModelInputForCPUWithSamplingMetadata]):
                 output.prefill_hidden_states = hidden_states
             output.hidden_states = hidden_states
         return [output]
+
+    def need_recv_kv(self, model_input, kv_caches) -> bool:
+        if self.vllm_config.kv_transfer_config is None:
+            return False
+
+        prefill_meta = model_input.attn_metadata.prefill_metadata
+        is_profile_run = (kv_caches[0].numel() == 0)
+        is_prefill_run = prefill_meta is not None
+
+        return self.vllm_config.kv_transfer_config.is_kv_consumer and (
+            not is_profile_run) and is_prefill_run
+
+    def need_send_kv(self, model_input, kv_caches) -> bool:
+        if self.vllm_config.kv_transfer_config is None:
+            return False
+
+        prefill_meta = model_input.attn_metadata.prefill_metadata
+        is_profile_run = (kv_caches[0].numel() == 0)
+        is_prefill_run = prefill_meta is not None
+
+        return self.vllm_config.kv_transfer_config.is_kv_producer and (
+            not is_profile_run) and is_prefill_run
 
     def generate_proposals(self, *args, **kwargs):
         return self.model.generate_proposals(*args, **kwargs)

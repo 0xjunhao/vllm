@@ -78,6 +78,14 @@ async def async_request_openai_completions(
             "stream_options": {
                 "include_usage": True,
             },
+            'provider': {
+                'order': [
+        'Fireworks',
+        'Together',
+        'Together 2',
+      ],
+      'allow_fallbacks': false
+    }
         }
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos

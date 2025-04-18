@@ -264,7 +264,12 @@ async def async_request_openai_completions(
             "stream_options": {
                 "include_usage": True,
             },
+            "provider": {
+                "order": ["Together", "Together 2", "Fireworks"]
+            },
+            "allow_fallbacks": False
         }
+        #"order": ["Together", "Together 2", "Fireworks", "Azure", "Lambda"]
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos
         if request_func_input.extra_body:
@@ -291,7 +296,7 @@ async def async_request_openai_completions(
 
                         chunk = chunk_bytes.decode("utf-8").removeprefix(
                             "data: ")
-                        if chunk != "[DONE]":
+                        if chunk != "[DONE]" and chunk != ": OPENROUTER PROCESSING":
                             data = json.loads(chunk)
 
                             # NOTE: Some completion API might have a last
@@ -300,7 +305,8 @@ async def async_request_openai_completions(
                             if choices := data.get("choices"):
                                 # Note that text could be empty here
                                 # e.g. for special tokens
-                                text = choices[0].get("text")
+                                text = choices[0].get("text") or ""
+                                text += choices[0].get("reasoning") or ""
                                 timestamp = time.perf_counter()
                                 # First token
                                 if not first_chunk_received:
@@ -315,7 +321,7 @@ async def async_request_openai_completions(
 
                                 most_recent_timestamp = timestamp
                                 generated_text += text or ""
-                            elif usage := data.get("usage"):
+                            if usage := data.get("usage"):
                                 output.output_tokens = usage.get(
                                     "completion_tokens")
                     if first_chunk_received:
@@ -369,6 +375,10 @@ async def async_request_openai_chat_completions(
             "stream_options": {
                 "include_usage": True,
             },
+            "provider": {
+                "order": ["Together", "Together 2", "Fireworks"]
+            },
+            "allow_fallbacks": False
         }
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos
@@ -387,6 +397,7 @@ async def async_request_openai_chat_completions(
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
+            print(payload)
             async with session.post(url=api_url, json=payload,
                                     headers=headers) as response:
                 if response.status == 200:
