@@ -264,6 +264,8 @@ class KVCacheManager:
             request, self.req_to_block_hashes[request.request_id],
             num_computed_tokens + num_new_tokens - len(request.spec_token_ids))
 
+        logger.info("KV usage: %.3f", self.usage)
+
         return KVCacheBlocks(new_blocks)
 
     def free(self, request: Request) -> None:

@@ -4,12 +4,14 @@ from collections import defaultdict
 from typing import Callable
 
 from vllm.utils import cdiv
+from vllm.logger import init_logger
 from vllm.v1.core.block_pool import BlockPool
 from vllm.v1.core.kv_cache_utils import BlockHashType, KVCacheBlock
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheSpec,
                                         SlidingWindowSpec)
 from vllm.v1.request import Request
 
+logger = init_logger(__name__)
 
 class SingleTypeKVCacheManager(ABC):
     """
@@ -146,6 +148,8 @@ class SingleTypeKVCacheManager(ABC):
         """
         num_cached_blocks = self.num_cached_block[request.request_id]
         num_full_blocks = num_tokens // self.block_size
+        logger.info("num_tokens: %d, self.block_size: %d, num_full_blocks: %d",
+            num_tokens, self.block_size, num_full_blocks)
 
         self.block_pool.cache_full_blocks(
             request=request,
@@ -239,6 +243,7 @@ class FullAttentionManager(SingleTypeKVCacheManager):
                 break
         if self.use_eagle and len(computed_blocks) > 0:
             computed_blocks.pop()
+        logger.info("# cache blocks hit: %d", len(computed_blocks))
         return computed_blocks
 
     def remove_skipped_blocks(self, request_id: str,

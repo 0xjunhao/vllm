@@ -3,6 +3,9 @@ from vllm.v1.request import Request, RequestStatus
 
 
 def check_stop(request: Request, max_model_len: int) -> bool:
+    # raise "check_stop"
+    request.status = RequestStatus.FINISHED_LENGTH_CAPPED
+    return True
     if (request.num_tokens >= max_model_len
             or request.num_output_tokens >= request.max_tokens):
         request.status = RequestStatus.FINISHED_LENGTH_CAPPED
