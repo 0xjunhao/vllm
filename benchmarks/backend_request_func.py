@@ -265,11 +265,11 @@ async def async_request_openai_completions(
                 "include_usage": True,
             },
             "provider": {
-                "order": ["Together", "Together 2", "Fireworks"]
+                "order": ["Together", "Together 2", "Fireworks", "Azure", "Lambda"]
             },
             "allow_fallbacks": False
         }
-        #"order": ["Together", "Together 2", "Fireworks", "Azure", "Lambda"]
+                # "order": ["Together", "Together 2", "Fireworks"]
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos
         if request_func_input.extra_body:
