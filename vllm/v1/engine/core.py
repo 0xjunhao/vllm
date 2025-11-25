@@ -202,6 +202,15 @@ class EngineCore:
         )
         self.async_scheduling = vllm_config.scheduler_config.async_scheduling
 
+        self.perf_stats = {
+            'schedule': 0.0,
+            'execute_launch': 0.0,
+            'grammar': 0.0,
+            'await_result': 0.0,
+            'update': 0.0,
+            'count': 0
+        }
+
         # Mark the startup heap as static so that it's ignored by GC.
         # Reduces pause times of oldest generation collections.
         freeze_gc_heap()
@@ -335,17 +344,39 @@ class EngineCore:
         # or finished and not yet removed from the batch.
         if not self.scheduler.has_requests():
             return {}, False
+        t0 = time.perf_counter()
         scheduler_output = self.scheduler.schedule()
+        t1 = time.perf_counter()
         future = self.model_executor.execute_model(scheduler_output, non_block=True)
+        t2 = time.perf_counter()
         grammar_output = self.scheduler.get_grammar_bitmask(scheduler_output)
+        t3 = time.perf_counter()
         with self.log_error_detail(scheduler_output):
             model_output = future.result()
             if model_output is None:
                 model_output = self.model_executor.sample_tokens(grammar_output)
+        t4 = time.perf_counter()
 
         engine_core_outputs = self.scheduler.update_from_output(
             scheduler_output, model_output
         )
+        t5 = time.perf_counter()
+        self.perf_stats['schedule'] += (t1 - t0)
+        self.perf_stats['execute_launch'] += (t2 - t1)
+        self.perf_stats['grammar'] += (t3 - t2)
+        self.perf_stats['await_result'] += (t4 - t3)
+        self.perf_stats['update'] += (t5 - t4)
+        self.perf_stats['count'] += 1
+
+        if self.perf_stats['count'] % 100 == 0:
+            c = self.perf_stats['count']
+            logger.info(f"--- Step Performance (Avg over {c} steps) ---")
+            logger.info(f"Scheduling:   {self.perf_stats['schedule']/c*1000:.3f} ms")
+            logger.info(f"Launch Exec:  {self.perf_stats['execute_launch']/c*1000:.3f} ms")
+            logger.info(f"Grammar:      {self.perf_stats['grammar']/c*1000:.3f} ms")
+            logger.info(f"Await Result: {self.perf_stats['await_result']/c*1000:.3f} ms")
+            logger.info(f"Update State: {self.perf_stats['update']/c*1000:.3f} ms")
+            logger.info("---------------------------------------------")
 
         return engine_core_outputs, scheduler_output.total_num_scheduled_tokens > 0
 
