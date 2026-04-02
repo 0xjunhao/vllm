@@ -988,6 +988,33 @@ if(VLLM_GPU_LANG STREQUAL "CUDA")
     endif()
   endif()
 
+  # Only build W4A16 kernels if we are building for something compatible with sm90a
+  cuda_archs_loose_intersection(W4A16_ARCHS "9.0a" "${CUDA_ARCHS}")
+  if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.0 AND W4A16_ARCHS)
+    set(SRCS
+       "csrc/libtorch_stable/quantization/cutlass_w4a16/w4a16_grouped_mm_entry.cu"
+       )
+
+    set_gencode_flags_for_srcs(
+      SRCS "${SRCS}"
+      CUDA_ARCHS "${W4A16_ARCHS}")
+
+    list(APPEND VLLM_STABLE_EXT_SRC "${SRCS}")
+
+    message(STATUS "Building W4A16 kernels for archs: ${W4A16_ARCHS}")
+  else()
+    if (NOT ${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.0
+        AND W4A16_ARCHS)
+      message(STATUS "Not building W4A16 kernels as CUDA Compiler version is "
+                     "not >= 12.0, we recommend upgrading to CUDA 12.0 or "
+                     "later if you intend on running w4a16 quantized models on "
+                     "Hopper.")
+    else()
+      message(STATUS "Not building W4A16 kernels as no compatible archs "
+                     "found in CUDA target architectures")
+    endif()
+  endif()
+
   message(STATUS "Enabling C_stable extension.")
   define_extension_target(
     _C_stable_libtorch

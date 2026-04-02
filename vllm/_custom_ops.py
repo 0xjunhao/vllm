@@ -1574,6 +1574,69 @@ def cutlass_w4a8_moe_mm(
         maybe_schedule,
     )
 
+def cutlass_w4a16_moe_mm(
+    out_tensors: torch.Tensor,
+    a_tensors: torch.Tensor,
+    b_tensors: torch.Tensor,
+    b_group_scales: torch.Tensor,
+    b_group_size: int,
+    expert_offsets: torch.Tensor,
+    problem_sizes: torch.Tensor,
+    a_strides: torch.Tensor,
+    b_strides: torch.Tensor,
+    c_strides: torch.Tensor,
+    group_scale_strides: torch.Tensor,
+    maybe_schedule: str | None = None,
+):
+    """
+    Executes the CUTLASS-based fused-MoE grouped matrix multiplication for the
+    W4A16 quantization scheme. Uses group-wise quantization (INT4 -> BF16/FP16)
+    for weights, while activations remain in native 16-bit precision.
+
+    Args:
+        out_tensors:
+            Output buffer for all experts (updated in-place).
+        a_tensors:
+            16-bit (BF16 or FP16) activations for all experts.
+        b_tensors:
+            INT4-packed weight matrix for all experts, packed to INT32.
+        b_group_scales:
+            16-bit scale values for group-wise INT4 weight blocks.
+        b_group_size:
+            Number of elements grouped under each entry of b_group_scales.
+        expert_offsets:
+            Cumulative token offsets mapping tokens to their assigned experts.
+        problem_sizes:
+            Per-expert (M, N, K) GEMM sizes used by the grouped GEMM launcher.
+        a_strides:
+            Strides describing the memory layout of the a_tensors.
+        b_strides:
+            Strides describing the memory layout of the b_tensors.
+        c_strides:
+            Strides describing the memory layout of the out_tensors.
+        group_scale_strides:
+            Strides describing the memory layout of the b_group_scales.
+        maybe_schedule:
+            Optional override to choose a specific CUTLASS kernel configuration/schedule.
+
+    Returns:
+        out_tensors updated in-place with the dequantized INT4x16-bit grouped GEMM result.
+    """
+    return torch.ops._C.cutlass_w4a16_moe_mm(
+        out_tensors,
+        a_tensors,
+        b_tensors,
+        b_group_scales,
+        b_group_size,
+        expert_offsets,
+        problem_sizes,
+        a_strides,
+        b_strides,
+        c_strides,
+        group_scale_strides,
+        maybe_schedule,
+    )
+
 
 def cutlass_encode_and_reorder_int4b_grouped(
     b_tensors: torch.Tensor,

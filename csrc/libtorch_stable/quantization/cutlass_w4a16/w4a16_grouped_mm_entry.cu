@@ -22,7 +22,6 @@
 
 #include "get_group_starts.cuh"
 #include "cutlass_extensions/epilogue/scaled_mm_epilogues_c3x.hpp"
-#include "w4a16_utils.cuh" 
 
 namespace vllm::cutlass_w4a16_moe {
 
@@ -115,7 +114,7 @@ struct W4A16GroupedGemmKernel {
   using CollectiveMainloopShuffled =
       typename cutlass::gemm::collective::CollectiveBuilder<
           ArchTag, OperatorClass,
-          cute::tuple<ElementB, cutlass::Array<ElementScale, 8>>,
+          cute::tuple<ElementB, ElementScale>,
           LayoutB_Reordered*, AlignmentB, ElementA, LayoutA_Transpose*,
           AlignmentA, ElementAccumulator, TileShape, ClusterShape,
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
@@ -192,8 +191,7 @@ struct W4A16GroupedGemmKernel {
         static_cast<LayoutB_Reordered*>(b_strides.data_ptr()),
         static_cast<const MmaType**>(a_ptrs.data_ptr()),
         static_cast<StrideA*>(a_strides.data_ptr()),
-        static_cast<const cutlass::Array<ElementScale, 8>**>(
-            b_group_scales_ptrs.data_ptr()),
+        static_cast<const ElementScale**>(b_group_scales_ptrs.data_ptr()),
         static_cast<StrideS*>(group_scale_strides.data_ptr()),
         static_cast<int>(b_group_size)};
 

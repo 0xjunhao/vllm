@@ -173,6 +173,8 @@ class CompressedTensorsMoEMethod(FusedMoEMethodBase):
                     f" and bits: {weight_quant.num_bits}",
                 )
 
+            logger.info_once(">>> current_platform.is_device_capability(90)", current_platform.is_device_capability(90))
+            logger.info_once(">>> weight_quant.num_bits", weight_quant.num_bits)
             if (current_platform.is_device_capability(90) and weight_quant.num_bits == 4):
                 logger.info_once("Using CompressedTensorsW4A16CutlassMoEMethod")
                 return CompressedTensorsW4A16CutlassMoEMethod(
@@ -2255,7 +2257,7 @@ class CompressedTensorsW4A16CutlassMoEMethod(CompressedTensorsMoEMethod):
             "Only symmetric quantization is supported for W4A16 MoE"
         )
         assert self.weight_quant.actorder != "group"
-        assert self.group_size == 128, "Only group size 128 supported for W4A16 MoE"
+        assert self.group_size == 32, "Only group size 32 supported for W4A16 MoE"
 
         self.disable_expert_map = False
         self.layer_name = layer_name
@@ -2427,6 +2429,9 @@ class CompressedTensorsW4A16CutlassMoEMethod(CompressedTensorsMoEMethod):
         return int4_w4a16_moe_quant_config(
             w1_scale=layer.w13_weight_scale,  # group scale
             w2_scale=layer.w2_weight_scale,  # group scale
+            w1_zp=None,
+            w2_zp=None,
+            block_shape=[0, self.group_size],
         )
 
     def select_gemm_impl(
