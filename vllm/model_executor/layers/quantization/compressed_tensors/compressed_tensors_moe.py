@@ -12,6 +12,7 @@ from compressed_tensors.quantization import (
     QuantizationStrategy,
 )
 
+import vllm.envs as envs
 import vllm.model_executor.layers.fused_moe.modular_kernel as mk
 from vllm import _custom_ops as ops
 from vllm.distributed import get_tensor_model_parallel_world_size
@@ -113,6 +114,7 @@ __all__ = [
     "CompressedTensorsWNA16MoEMethod",
     "CompressedTensorsW4A4Nvfp4MoEMethod",
     "CompressedTensorsW4A8Int8MoEMethod",
+    "CompressedTensorsW4A16CutlassMoEMethod",
 ]
 
 
@@ -173,9 +175,11 @@ class CompressedTensorsMoEMethod(FusedMoEMethodBase):
                     f" and bits: {weight_quant.num_bits}",
                 )
 
-            logger.info_once(">>> current_platform.is_device_capability(90)", current_platform.is_device_capability(90))
-            logger.info_once(">>> weight_quant.num_bits", weight_quant.num_bits)
-            if (current_platform.is_device_capability(90) and weight_quant.num_bits == 4):
+            if (
+                env.VLLM_USE_CUTLASS_MOE_W4A16_INT4
+                and current_platform.is_device_capability(90)
+                and weight_quant.num_bits == 4
+            ):
                 logger.info_once("Using CompressedTensorsW4A16CutlassMoEMethod")
                 return CompressedTensorsW4A16CutlassMoEMethod(
                     weight_quant, input_quant, layer.moe_config
