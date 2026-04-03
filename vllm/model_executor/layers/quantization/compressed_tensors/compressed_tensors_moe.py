@@ -176,7 +176,7 @@ class CompressedTensorsMoEMethod(FusedMoEMethodBase):
                 )
 
             if (
-                env.VLLM_USE_CUTLASS_MOE_W4A16_INT4
+                envs.VLLM_USE_CUTLASS_MOE_W4A16_INT4
                 and current_platform.is_device_capability(90)
                 and weight_quant.num_bits == 4
             ):
