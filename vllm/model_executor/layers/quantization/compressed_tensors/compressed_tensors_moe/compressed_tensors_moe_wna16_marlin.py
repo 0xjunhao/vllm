@@ -573,3 +573,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
             is_k_full=self.is_k_full,
             inplace=not self.moe.disable_inplace,
         )
+
+    @property
+    def supports_eplb(self) -> bool:
+        return True
