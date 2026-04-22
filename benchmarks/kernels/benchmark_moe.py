@@ -308,13 +308,14 @@ def benchmark_config(
 
     # Capture 10 invocations with CUDA graph
     graph = torch.cuda.CUDAGraph()
+    num_invocations = max(1, num_iters // 5)
     with torch.cuda.graph(graph):
-        for _ in range(10):
+        for _ in range(num_invocations):
             run()
     torch.accelerator.synchronize()
 
     # Warmup
-    for _ in range(5):
+    for _ in range(max(1, num_iters // 5)):
         graph.replay()
     torch.accelerator.synchronize()
 
@@ -331,7 +332,7 @@ def benchmark_config(
         end_event.record()
         end_event.synchronize()
         latencies.append(start_event.elapsed_time(end_event))
-    avg = sum(latencies) / (num_iters * 10) * 1000  # us
+    avg = sum(latencies) / (num_iters * num_invocations) * 1000  # us
     graph.reset()
     return avg
 
@@ -405,6 +406,13 @@ def get_configs_compute_bound(use_fp16, block_quant_shape) -> list[dict[str, int
                 or config["BLOCK_SIZE_N"] % block_n != 0
             ):
                 configs.remove(config)
+
+    # Remove configs that are not compatible with int4_w4a16.
+    if block_quant_shape is None and not use_fp16:
+        for config in configs[:]:
+            if config["BLOCK_SIZE_M"] > 64:
+                configs.remove(config)
+
     return configs
 
 
@@ -643,7 +651,7 @@ class BenchmarkWorker:
                         use_fp8_w8a8,
                         use_int8_w8a16,
                         use_int4_w4a16,
-                        num_iters=20,
+                        num_iters=max(1, min(100, 4096 // num_tokens)),
                         block_quant_shape=block_quant_shape,
                         use_deep_gemm=use_deep_gemm,
                     )
@@ -809,6 +817,12 @@ def get_model_params(config):
         # Pixtral can contain different LLM architectures,
         # recurse to get their parameters
         return get_model_params(config.get_text_config())
+    elif architecture == "KimiK25ForConditionalGeneration":
+        config = config.get_text_config()
+        E = config.n_routed_experts
+        topk = config.num_experts_per_tok
+        intermediate_size = config.moe_intermediate_size
+        hidden_size = config.hidden_size
     else:
         # Support for llama4
         config = config.get_text_config()
@@ -923,6 +937,7 @@ def main(args: argparse.Namespace):
             3072,
             4096,
         ]
+        batch_sizes.reverse()
     else:
         batch_sizes = args.batch_size
 
