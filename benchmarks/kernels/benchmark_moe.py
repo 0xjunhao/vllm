@@ -831,6 +831,7 @@ def get_model_params(config):
         topk = config.num_experts_per_tok
         intermediate_size = config.intermediate_size
         hidden_size = config.hidden_size
+    print(f"E: {E}, topk: {topk}, intermediate_size: {intermediate_size}, hidden_size: {hidden_size}")
     return E, topk, intermediate_size, hidden_size
 
 
