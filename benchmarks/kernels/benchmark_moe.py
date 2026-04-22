@@ -651,7 +651,7 @@ class BenchmarkWorker:
                         use_fp8_w8a8,
                         use_int8_w8a16,
                         use_int4_w4a16,
-                        num_iters=max(1, min(100, 4096 // num_tokens)),
+                        num_iters=max(1, min(50, 4096 // num_tokens)),
                         block_quant_shape=block_quant_shape,
                         use_deep_gemm=use_deep_gemm,
                     )
