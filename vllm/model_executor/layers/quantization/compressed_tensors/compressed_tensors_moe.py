@@ -177,6 +177,7 @@ class CompressedTensorsMoEMethod(FusedMoEMethodBase):
             if (
                 not check_moe_marlin_supports_layer(layer, group_size)
                 or current_platform.is_rocm()
+                or True  # TODO(junhao): change to envs
             ):
                 if (
                     weight_quant.strategy == QuantizationStrategy.GROUP
