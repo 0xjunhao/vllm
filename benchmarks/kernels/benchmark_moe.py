@@ -308,7 +308,7 @@ def benchmark_config(
 
     # Capture 10 invocations with CUDA graph
     graph = torch.cuda.CUDAGraph()
-    num_invocations = max(1, num_iters // 5)
+    num_invocations = 3
     with torch.cuda.graph(graph):
         for _ in range(num_invocations):
             run()
