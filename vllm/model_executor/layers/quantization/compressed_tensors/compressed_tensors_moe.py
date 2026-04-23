@@ -177,7 +177,7 @@ class CompressedTensorsMoEMethod(FusedMoEMethodBase):
             if (
                 not check_moe_marlin_supports_layer(layer, group_size)
                 or current_platform.is_rocm()
-                or True  # TODO(junhao): change to envs
+                # or True  # TODO(junhao): change to envs
             ):
                 if (
                     weight_quant.strategy == QuantizationStrategy.GROUP
@@ -1667,6 +1667,10 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
             is_k_full=self.is_k_full,
             inplace=not self.moe.disable_inplace,
         )
+    
+    @property
+    def supports_eplb(self) -> bool:
+        return True
 
 
 class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
