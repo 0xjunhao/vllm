@@ -368,6 +368,7 @@ class KimiK25ForConditionalGeneration(
         self.media_placeholder: int = self.config.media_placeholder_token_id
 
         # MoE hyperparameters for EPLB
+        self.expert_weights = self.language_model.expert_weights
         self.num_expert_groups = self.language_model.num_expert_groups
         self.num_logical_experts = self.language_model.num_logical_experts
         self.num_physical_experts = self.language_model.num_physical_experts
@@ -377,7 +378,6 @@ class KimiK25ForConditionalGeneration(
         self.num_redundant_experts = self.language_model.num_redundant_experts
         self.moe_layers = self.language_model.moe_layers
         self.num_moe_layers = len(self.moe_layers)
-        self.expert_weights: list[list[torch.Tensor]] = []
 
     def _maybe_ignore_quant_config(self, quant_config: QuantizationConfig):
         if isinstance(quant_config, compressed_tensors.CompressedTensorsConfig):
@@ -485,7 +485,6 @@ class KimiK25ForConditionalGeneration(
             logical_to_physical_map=logical_to_physical_map,
             logical_replica_count=logical_replica_count,
         )
-        self.expert_weights = self.language_model.expert_weights
 
     def update_physical_experts_metadata(
         self,
