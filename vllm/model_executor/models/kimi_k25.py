@@ -496,3 +496,5 @@ class KimiK25ForConditionalGeneration(
             num_physical_experts=num_physical_experts,
             num_local_physical_experts=num_local_physical_experts,
         )
+        self.num_physical_experts = num_physical_experts
+        self.num_local_physical_experts = num_local_physical_experts
