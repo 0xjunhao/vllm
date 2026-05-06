@@ -18,6 +18,7 @@ On the client side, run:
         --num-prompts <num_prompts. Default 1000>
 """
 
+from vllm.utils.system_utils import set_ulimit
 import argparse
 import asyncio
 import contextlib
@@ -781,6 +782,10 @@ async def benchmark(
 
     print(f"Burstiness factor: {burstiness} ({distribution})")
     print(f"Maximum request concurrency: {max_concurrency}")
+
+    # Ensure that the ulimit is sufficiently high to handle the concurrency.
+    minimal_ulimit = max_concurrency + 100 if max_concurrency is not None else 65536
+    set_ulimit(minimal_ulimit)
 
     spec_decode_metrics_before = await fetch_spec_decode_metrics(base_url, session)
 
