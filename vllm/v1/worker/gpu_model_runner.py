@@ -3595,6 +3595,10 @@ class GPUModelRunner(
 
         num_tokens_padded = self._pad_for_sequence_parallelism(num_tokens)
 
+        token_padding_factor = envs.VLLM_TOKEN_PADDING_FACTOR
+        if token_padding_factor > 1:
+            num_tokens_padded = round_up(num_tokens_padded, token_padding_factor)
+
         def dispatch_cudagraph(num_tokens, disable_full=False, valid_modes=None):
             return self.cudagraph_dispatcher.dispatch(
                 num_tokens=num_tokens,
