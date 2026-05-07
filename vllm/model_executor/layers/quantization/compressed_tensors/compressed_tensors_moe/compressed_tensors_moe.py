@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-
 import torch
 from compressed_tensors import CompressionFormat
 from compressed_tensors.quantization import (
@@ -9,6 +8,7 @@ from compressed_tensors.quantization import (
     QuantizationStrategy,
 )
 
+import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe import (
     FusedMoEMethodBase,
@@ -93,6 +93,15 @@ class CompressedTensorsMoEMethod(FusedMoEMethodBase):
                     f" and bits: {weight_quant.num_bits}",
                 )
 
+            if envs.VLLM_USE_CUTLASS_MOE_W4A16_INT4:
+                from .compressed_tensors_moe_w4a16_int4 import (
+                    CompressedTensorsW4A16CutlassMoEMethod,
+                )
+
+                logger.info_once("Using CompressedTensorsW4A16CutlassMoEMethod")
+                return CompressedTensorsW4A16CutlassMoEMethod(
+                    weight_quant, input_quant, layer.moe_config
+                )
             # Prefer to use the MarlinMoE kernel when it is supported.
             if (
                 not check_moe_marlin_supports_layer(layer, group_size)
