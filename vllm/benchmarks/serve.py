@@ -18,7 +18,6 @@ On the client side, run:
         --num-prompts <num_prompts. Default 1000>
 """
 
-from vllm.utils.system_utils import set_ulimit
 import argparse
 import asyncio
 import contextlib
@@ -55,6 +54,7 @@ from vllm.benchmarks.lib.utils import convert_to_pytorch_benchmark_format, write
 from vllm.tokenizers import TokenizerLike, get_tokenizer
 from vllm.utils.gc_utils import freeze_gc_heap
 from vllm.utils.network_utils import join_host_port
+from vllm.utils.system_utils import set_ulimit
 
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
 

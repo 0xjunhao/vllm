@@ -93,6 +93,9 @@ if HAS_TRITON:
         CutlassBatchedExpertsFp8,
         CutlassExpertsFp8,
         CutlassExpertsW4A8Fp8,
+        CutlassExpertsW4A16,
+        cutlass_moe_w4a8_fp8,
+        cutlass_moe_w4a16,
     )
     from vllm.model_executor.layers.fused_moe.experts.deep_gemm_moe import (
         DeepGemmExperts,
@@ -132,9 +135,12 @@ if HAS_TRITON:
         "fused_experts",
         "get_config_file_name",
         "GroupedTopk",
+        "cutlass_moe_w4a8_fp8",
+        "cutlass_moe_w4a16",
         "CutlassExpertsFp8",
         "CutlassBatchedExpertsFp8",
         "CutlassExpertsW4A8Fp8",
+        "CutlassExpertsW4A16",
         "TritonExperts",
         "TritonWNA16Experts",
         "BatchedTritonExperts",
