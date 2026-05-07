@@ -178,6 +178,7 @@ if TYPE_CHECKING:
     VLLM_USE_FLASHINFER_MOE_FP8: bool = False
     VLLM_USE_FLASHINFER_MOE_FP4: bool = False
     VLLM_USE_FLASHINFER_MOE_INT4: bool = False
+    VLLM_USE_CUTLASS_MOE_W4A16_INT4: bool = False
     VLLM_FLASHINFER_MOE_BACKEND: Literal["throughput", "latency", "masked_gemm"] = (
         "latency"
     )
@@ -1066,7 +1067,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Pad the weights for the moe kernel
     "VLLM_ROCM_MOE_PADDING": lambda: bool(int(os.getenv("VLLM_ROCM_MOE_PADDING", "1"))),
     # Pad the tokens for better GEMM performance, default to 1
-    "VLLM_TOKEN_PADDING_FACTOR": lambda: int(os.getenv("VLLM_TOKEN_PADDING_FACTOR", "1")),
+    "VLLM_TOKEN_PADDING_FACTOR": lambda: int(
+        os.getenv("VLLM_TOKEN_PADDING_FACTOR", "1")
+    ),
     # Whether to use the shuffled kv cache layout
     "VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT": lambda: (
         os.getenv("VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT", "False").lower() in ("true", "1")
@@ -1313,6 +1316,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Allow use of FlashInfer MxInt4 MoE kernels for fused moe ops.
     "VLLM_USE_FLASHINFER_MOE_INT4": lambda: bool(
         int(os.getenv("VLLM_USE_FLASHINFER_MOE_INT4", "0"))
+    ),
+    # Allow use of Cutlass W4A16 Int4 MoE kernels for fused moe ops.
+    "VLLM_USE_CUTLASS_MOE_W4A16_INT4": lambda: bool(
+        int(os.getenv("VLLM_USE_CUTLASS_MOE_W4A16_INT4", "0"))
     ),
     # If set to 1, use the FlashInfer
     # MXFP8 (activation) x MXFP4 (weight) MoE backend.
