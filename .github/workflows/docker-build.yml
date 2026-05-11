@@ -1,0 +1,174 @@
+name: Build and push vLLM image
+#   torch_cuda_arch_list = "9.0 10.0+PTX"
+#     9.0   = Hopper (H100, H200)
+#     10.0  = datacenter Blackwell (B100, B200)
+#     +PTX  = forward-compat for future 10.x GPUs (e.g. B300/sm_103)
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch label to include in the image tag. Used as the checkout ref when no tag is given.'
+        required: true
+        default: 'main'
+      tag:
+        description: 'Optional git tag to build. If set, checkout uses this tag; the tag name appears in the image tag.'
+        required: false
+        default: ''
+      cuda_version:
+        description: 'CUDA toolchain to build against.'
+        type: choice
+        required: false
+        default: '12.9'
+        options:
+          - '12.9'
+          - '13.0'
+      torch_cuda_arch_list:
+        description: 'CUDA arch list. Default targets H100/H200 + B100/B200.'
+        required: false
+        default: '9.0 10.0+PTX'
+      vllm_use_precompiled:
+        description: 'Skip kernel build, use vLLM prebuilt wheels. ONLY safe with no kernel changes.'
+        type: boolean
+        required: false
+        default: false
+
+env:
+  IMAGE_NAME: ubicloud/vllm
+  CACHE_IMAGE: ubicloud/vllm-cache
+  DOCKERFILE: docker/Dockerfile
+  TARGET: vllm-ubicloud
+
+jobs:
+  build:
+    runs-on: ubicloud-standard-30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Print inputs
+        run: echo "${{ toJSON(github.event.inputs) }}"
+
+      - name: Resolve checkout ref
+        id: ref
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            CHECKOUT_REF="${{ inputs.tag }}"
+            echo "Using tag for checkout: ${CHECKOUT_REF}"
+          else
+            CHECKOUT_REF="${{ inputs.branch }}"
+            echo "Using branch for checkout: ${CHECKOUT_REF}"
+          fi
+          echo "checkout_ref=${CHECKOUT_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.checkout_ref }}
+          fetch-depth: 1
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL || true
+          sudo docker system prune -af || true
+          df -h
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Build the per-segment slugs that compose the final image tag.
+      # Outputs:
+      #   branch_slug -> sanitized inputs.branch
+      #   middle      -> inputs.tag (slugged) if set, else short SHA
+      - name: Compose tag segments
+        id: seg
+        run: |
+          slugify() {
+            echo "$1" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100
+          }
+          BRANCH_SLUG=$(slugify "${{ inputs.branch }}")
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            MIDDLE=$(slugify "${{ inputs.tag }}")
+          else
+            MIDDLE=$(git rev-parse --short HEAD)
+          fi
+          {
+            echo "branch_slug=${BRANCH_SLUG}"
+            echo "middle=${MIDDLE}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Branch slug: ${BRANCH_SLUG}"
+          echo "Middle:      ${MIDDLE}"
+
+      - name: Resolve CUDA toolchain
+        id: cuda
+        run: |
+          case "${{ inputs.cuda_version }}" in
+            12.9)
+              CUDA_FULL="12.9.1"
+              CUDA_VARIANT="cu129"
+              ;;
+            13.0)
+              CUDA_FULL="13.0.2"
+              CUDA_VARIANT="cu130"
+              ;;
+            *)
+              echo "Unsupported cuda_version: ${{ inputs.cuda_version }}" >&2
+              exit 1
+              ;;
+          esac
+          BASE_IMAGE="nvidia/cuda:${CUDA_FULL}-devel-ubuntu22.04"
+          {
+            echo "cuda_full=${CUDA_FULL}"
+            echo "cuda_variant=${CUDA_VARIANT}"
+            echo "base_image=${BASE_IMAGE}"
+          } >> "$GITHUB_OUTPUT"
+          echo "CUDA toolchain: ${CUDA_FULL} (${CUDA_VARIANT})"
+          echo "Base image:     ${BASE_IMAGE}"
+
+      # Cache key uses branch only (not the middle segment). This way every
+      # build from the same branch shares cache, whether tagged or untagged,
+      # and the fallback to `main-<variant>` keeps non-main branches warm too.
+      - name: Compute cache refs
+        id: cache
+        run: |
+          VARIANT="${{ steps.cuda.outputs.cuda_variant }}"
+          BRANCH_SLUG="${{ steps.seg.outputs.branch_slug }}"
+          CACHE_TAG="${BRANCH_SLUG}-${VARIANT}"
+          MAIN_CACHE_TAG="main-${VARIANT}"
+          {
+            echo "to=type=registry,ref=${{ env.CACHE_IMAGE }}:${CACHE_TAG},mode=max"
+            echo "from_branch=type=registry,ref=${{ env.CACHE_IMAGE }}:${CACHE_TAG}"
+            echo "from_main=type=registry,ref=${{ env.CACHE_IMAGE }}:${MAIN_CACHE_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Resolve build args
+        id: args
+        run: |
+          PRECOMPILED="${{ inputs.vllm_use_precompiled && '1' || '0' }}"
+          echo "precompiled=${PRECOMPILED}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          target: ${{ env.TARGET }}
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.seg.outputs.branch_slug }}-${{ steps.seg.outputs.middle }}-${{ steps.cuda.outputs.cuda_variant }}
+          cache-from: |
+            ${{ steps.cache.outputs.from_branch }}
+            ${{ steps.cache.outputs.from_main }}
+          cache-to: ${{ steps.cache.outputs.to }}
+          build-args: |
+            CUDA_VERSION=${{ steps.cuda.outputs.cuda_full }}
+            BUILD_BASE_IMAGE=${{ steps.cuda.outputs.base_image }}
+            max_jobs=16
+            nvcc_threads=2
+            torch_cuda_arch_list=${{ inputs.torch_cuda_arch_list }}
+            VLLM_USE_PRECOMPILED=${{ steps.args.outputs.precompiled }}
+            RUN_WHEEL_CHECK=false
+          provenance: false
