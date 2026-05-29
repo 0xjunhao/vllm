@@ -241,6 +241,7 @@ if TYPE_CHECKING:
     VLLM_SYSTEM_START_DATE: str | None = None
     VLLM_TOOL_JSON_ERROR_AUTOMATIC_RETRY: bool = False
     VLLM_ENFORCE_STRICT_TOOL_CALLING: bool = False
+    VLLM_ENABLE_TOOL_NAME_VALIDATION: bool = False
     VLLM_CUSTOM_SCOPES_FOR_PROFILING: bool = False
     VLLM_NVTX_SCOPES_FOR_PROFILING: bool = False
     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
@@ -1813,6 +1814,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Default 0 (off).
     "VLLM_ENFORCE_STRICT_TOOL_CALLING": lambda: bool(
         int(os.getenv("VLLM_ENFORCE_STRICT_TOOL_CALLING", "0"))
+    ),
+    "VLLM_ENABLE_TOOL_NAME_VALIDATION": lambda: bool(
+        int(os.getenv("VLLM_ENABLE_TOOL_NAME_VALIDATION", "0"))
     ),
     # Add optional custom scopes for profiling, disable to avoid overheads
     "VLLM_CUSTOM_SCOPES_FOR_PROFILING": lambda: bool(

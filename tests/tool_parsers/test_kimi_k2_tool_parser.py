@@ -3,7 +3,7 @@
 # ruff: noqa: E501
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -13,7 +13,9 @@ from tests.tool_parsers.utils import (
 )
 from vllm.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionRequest,
+    ChatCompletionToolsParam,
 )
+from vllm.entrypoints.openai.engine.protocol import FunctionDefinition
 from vllm.tokenizers import get_tokenizer
 from vllm.tool_parsers.kimi_k2_tool_parser import KimiK2ToolParser
 
@@ -580,3 +582,115 @@ class TestStreamingIntervals:
         assert len(rec.tool_calls) == 1
         assert rec.tool_calls[0].function.name == "get_weather"
         assert json.loads(rec.tool_calls[0].function.arguments) == {"city": "Beijing"}
+
+
+def _make_tool(name: str) -> ChatCompletionToolsParam:
+    return ChatCompletionToolsParam(
+        type="function",
+        function=FunctionDefinition(name=name),
+    )
+
+
+_PATCH_VALIDATION = patch(
+    "vllm.tool_parsers.kimi_k2_tool_parser.VLLM_ENABLE_TOOL_NAME_VALIDATION", True
+)
+
+
+class TestToolNameValidation:
+    """Tests for VLLM_ENABLE_TOOL_NAME_VALIDATION behaviour."""
+
+    @pytest.fixture
+    def parser_with_tools(self, kimi_k2_tokenizer):
+        tools = [_make_tool("get_weather"), _make_tool("get_news")]
+        return KimiK2ToolParser(kimi_k2_tokenizer, tools=tools)
+
+    # Non-streaming: validation OFF (default) — unknown names pass through
+    def test_unknown_name_passes_when_validation_disabled(self, parser_with_tools):
+        model_output = "Help. " + _wrap(_tool("functions.unknown_func:0", '{"x": 1}'))
+        _, tool_calls = run_tool_extraction(
+            parser_with_tools, model_output, streaming=False
+        )
+        assert len(tool_calls) == 1
+        assert tool_calls[0].function.name == "unknown_func"
+
+    # Non-streaming: validation ON
+    @_PATCH_VALIDATION
+    def test_known_name_passes_when_validation_enabled(self, parser_with_tools):
+        model_output = "Checking. " + _wrap(
+            _tool("functions.get_weather:0", '{"city": "Paris"}')
+        )
+        _, tool_calls = run_tool_extraction(
+            parser_with_tools, model_output, streaming=False
+        )
+        assert len(tool_calls) == 1
+        assert tool_calls[0].function.name == "get_weather"
+        assert json.loads(tool_calls[0].function.arguments) == {"city": "Paris"}
+
+    @_PATCH_VALIDATION
+    def test_unknown_name_filtered_when_validation_enabled(self, parser_with_tools):
+        model_output = "Help. " + _wrap(_tool("functions.unknown_func:0", '{"x": 1}'))
+        _, tool_calls = run_tool_extraction(
+            parser_with_tools, model_output, streaming=False
+        )
+        assert tool_calls == []
+
+    @_PATCH_VALIDATION
+    def test_mixed_calls_filters_only_unknown(self, parser_with_tools):
+        model_output = "Tasks. " + _wrap(
+            _tool("functions.get_weather:0", '{"city": "Tokyo"}'),
+            _tool("functions.bad_func:1", '{"y": 2}'),
+            _tool("functions.get_news:2", '{"topic": "tech"}'),
+        )
+        _, tool_calls = run_tool_extraction(
+            parser_with_tools, model_output, streaming=False
+        )
+        names = [tc.function.name for tc in tool_calls]
+        assert names == ["get_weather", "get_news"]
+
+    # Streaming: validation OFF (default) — unknown names pass through
+    def test_streaming_unknown_name_passes_when_validation_disabled(
+        self, parser_with_tools
+    ):
+        deltas = _split_tool_output_to_deltas(
+            "Help. ", [("functions.unknown_func:0", '{"x": 1}')]
+        )
+        rec = run_tool_extraction_streaming(parser_with_tools, deltas)
+        assert len(rec.tool_calls) == 1
+        assert rec.tool_calls[0].function.name == "unknown_func"
+
+    # Streaming: validation ON
+    @_PATCH_VALIDATION
+    def test_streaming_known_name_passes_when_validation_enabled(
+        self, parser_with_tools
+    ):
+        deltas = _split_tool_output_to_deltas(
+            "Checking. ", [("functions.get_weather:0", '{"city": "Berlin"}')]
+        )
+        rec = run_tool_extraction_streaming(parser_with_tools, deltas)
+        assert len(rec.tool_calls) == 1
+        assert rec.tool_calls[0].function.name == "get_weather"
+        assert json.loads(rec.tool_calls[0].function.arguments) == {"city": "Berlin"}
+
+    @_PATCH_VALIDATION
+    def test_streaming_unknown_name_filtered_when_validation_enabled(
+        self, parser_with_tools
+    ):
+        deltas = _split_tool_output_to_deltas(
+            "Help. ", [("functions.unknown_func:0", '{"x": 1}')]
+        )
+        rec = run_tool_extraction_streaming(parser_with_tools, deltas)
+        assert rec.tool_calls == []
+
+    @_PATCH_VALIDATION
+    def test_streaming_mixed_calls_filters_only_unknown(self, parser_with_tools):
+        deltas = _split_tool_output_to_deltas(
+            "Tasks. ",
+            [
+                ("functions.get_weather:0", '{"city": "Seoul"}'),
+                ("functions.bad_func:1", '{"y": 2}'),
+                ("functions.get_news:2", '{"topic": "sports"}'),
+            ],
+        )
+        rec = run_tool_extraction_streaming(parser_with_tools, deltas)
+        names = [tc.function.name for tc in rec.tool_calls]
+        assert names == ["get_weather", "get_news"]
