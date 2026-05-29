@@ -4,9 +4,11 @@
 from collections.abc import Sequence
 
 import regex as re
+from openai.types.responses.function_tool import FunctionTool
 
 from vllm.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionRequest,
+    ChatCompletionToolsParam,
 )
 from vllm.entrypoints.openai.engine.protocol import (
     DeltaFunctionCall,
@@ -17,6 +19,7 @@ from vllm.entrypoints.openai.engine.protocol import (
     ToolCall,
 )
 from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
+from vllm.envs import VLLM_ENABLE_TOOL_NAME_VALIDATION
 from vllm.logger import init_logger
 from vllm.tokenizers import TokenizerLike
 from vllm.tool_parsers.abstract_tool_parser import (
@@ -36,6 +39,14 @@ class KimiK2ToolParser(ToolParser):
         self._sent_content_idx: int = 0
         self.prev_tool_call_arr: list[dict] = []
         self.streamed_args_for_tool: list[str] = []
+        self.supported_function_names: set[str] = set()
+        if self.tools:
+            self.supported_function_names = set()
+            for tool in self.tools:
+                if isinstance(tool, ChatCompletionToolsParam):
+                    self.supported_function_names.add(tool.function.name)
+                elif isinstance(tool, FunctionTool):
+                    self.supported_function_names.add(tool.name)
 
         # Section marker
         self.tool_calls_start_token: str = "<|tool_calls_section_begin|>"
@@ -96,6 +107,11 @@ class KimiK2ToolParser(ToolParser):
                     function_id, function_args = match
                     # function_id: functions.get_weather:0 or get_weather:0
                     function_name = function_id.split(":")[0].split(".")[-1]
+                    if (
+                        VLLM_ENABLE_TOOL_NAME_VALIDATION
+                        and function_name not in self.supported_function_names
+                    ):
+                        continue
                     tool_calls.append(
                         ToolCall(
                             id=function_id,
@@ -108,7 +124,7 @@ class KimiK2ToolParser(ToolParser):
 
                 content = model_output[: model_output.find(self.tool_calls_start_token)]
                 return ExtractedToolCallInformation(
-                    tools_called=True,
+                    tools_called=bool(tool_calls),
                     tool_calls=tool_calls,
                     content=content if content else None,
                 )
@@ -239,11 +255,25 @@ class KimiK2ToolParser(ToolParser):
                     if not tool_name:
                         # Can't skip to tool i+1 if i isn't ready
                         break
+                    if (
+                        VLLM_ENABLE_TOOL_NAME_VALIDATION
+                        and tool_name not in self.supported_function_names
+                    ):
+                        self.prev_tool_call_arr[i]["name"] = tool_name
+                        self.prev_tool_call_arr[i]["id"] = tool_id
+                        self.prev_tool_call_arr[i]["ignored"] = True
+                        continue
+                    # Assign a consecutive client-visible index, skipping
+                    # any filtered-out (ignored) tool calls.
+                    emitted_idx = sum(
+                        1 for tc in self.prev_tool_call_arr if "emitted_idx" in tc
+                    )
                     self.prev_tool_call_arr[i]["name"] = tool_name
                     self.prev_tool_call_arr[i]["id"] = tool_id
+                    self.prev_tool_call_arr[i]["emitted_idx"] = emitted_idx
                     tool_call_deltas.append(
                         DeltaToolCall(
-                            index=i,
+                            index=emitted_idx,
                             type="function",
                             id=tool_id,
                             function=DeltaFunctionCall(name=tool_name).model_dump(
@@ -252,12 +282,15 @@ class KimiK2ToolParser(ToolParser):
                         )
                     )
 
+                if self.prev_tool_call_arr[i].get("ignored"):
+                    continue
+
                 # Stream back new tool args by diffing against what was sent.
                 args_diff = self._compute_args_diff(i, tool_args)
                 if args_diff:
                     tool_call_deltas.append(
                         DeltaToolCall(
-                            index=i,
+                            index=self.prev_tool_call_arr[i]["emitted_idx"],
                             function=DeltaFunctionCall(arguments=args_diff).model_dump(
                                 exclude_none=True
                             ),
