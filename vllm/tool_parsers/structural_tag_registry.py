@@ -375,7 +375,8 @@ def get_kimi_k2_structural_tag(
         for tool in tools:
             function = tool.function
             parameters = _get_function_parameters(function)
-            tags.append(build_tool_call_sequence(function.name, parameters))
+            seq_format = build_tool_call_sequence(function.name, parameters)
+            tags.append(TagFormat(begin="", content=seq_format, end=""))
 
         if tags:
             function_calling_tags = TagsWithSeparatorFormat(
@@ -416,7 +417,8 @@ def get_kimi_k2_structural_tag(
         for tool in tools:
             function = tool.function
             parameters = _get_function_parameters(function)
-            tags.append(build_tool_call_sequence(function.name, parameters))
+            seq_format = build_tool_call_sequence(function.name, parameters)
+            tags.append(TagFormat(begin="", content=seq_format, end=""))
         assert len(tags) > 0
         suffix_tag = SequenceFormat(
             elements=[
