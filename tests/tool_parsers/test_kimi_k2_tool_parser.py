@@ -12,10 +12,14 @@ from tests.tool_parsers.utils import (
     run_tool_extraction_streaming,
 )
 from vllm.entrypoints.openai.chat_completion.protocol import (
+    ChatCompletionNamedFunction,
+    ChatCompletionNamedToolChoiceParam,
     ChatCompletionRequest,
+    ChatCompletionToolsParam,
 )
 from vllm.tokenizers import get_tokenizer
 from vllm.tool_parsers.kimi_k2_tool_parser import KimiK2ToolParser
+from vllm.tool_parsers.structural_tag_registry import StructuralTag
 
 MODEL = "moonshotai/Kimi-K2-Instruct"
 
@@ -28,6 +32,28 @@ def kimi_k2_tokenizer():
 @pytest.fixture
 def parser(kimi_k2_tokenizer):
     return KimiK2ToolParser(kimi_k2_tokenizer)
+
+
+@pytest.fixture
+def sample_tools() -> list[ChatCompletionToolsParam]:
+    return [
+        ChatCompletionToolsParam(
+            type="function",
+            function={
+                "name": "get_current_weather",
+                "description": "Get the current weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "city": {"type": "string", "description": "The city name"},
+                        "state": {"type": "string", "description": "The state code"},
+                        "unit": {"type": "string", "enum": ["fahrenheit", "celsius"]},
+                    },
+                    "required": ["city", "state"],
+                },
+            },
+        ),
+    ]
 
 
 SECTION_BEGIN = "<|tool_calls_section_begin|>"
@@ -580,3 +606,39 @@ class TestStreamingIntervals:
         assert len(rec.tool_calls) == 1
         assert rec.tool_calls[0].function.name == "get_weather"
         assert json.loads(rec.tool_calls[0].function.arguments) == {"city": "Beijing"}
+
+
+def test_get_vllm_registry_structural_tag_returns_structural_tag(
+    parser: KimiK2ToolParser,
+    sample_tools: list[ChatCompletionToolsParam],
+) -> None:
+    req = ChatCompletionRequest(
+        messages=[],
+        model="m",
+        tools=sample_tools,
+        tool_choice="auto",
+    )
+    tag = parser.get_structural_tag(req)
+    assert isinstance(tag, StructuralTag)
+
+    req = ChatCompletionRequest(
+        messages=[],
+        model="m",
+        tools=sample_tools,
+        tool_choice="required",
+    )
+    tag = parser.get_structural_tag(req)
+    assert isinstance(tag, StructuralTag)
+
+    if sample_tools:
+        tool = sample_tools[0]
+        req = ChatCompletionRequest(
+            messages=[],
+            model="m",
+            tools=sample_tools,
+        )
+        req.tool_choice = ChatCompletionNamedToolChoiceParam(
+            function=ChatCompletionNamedFunction(name=tool.function.name)
+        )
+        tag = parser.get_structural_tag(req)
+        assert isinstance(tag, StructuralTag)

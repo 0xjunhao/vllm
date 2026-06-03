@@ -23,6 +23,10 @@ from vllm.tool_parsers.abstract_tool_parser import (
     Tool,
     ToolParser,
 )
+from vllm.tool_parsers.structural_tag_registry import (
+    get_enable_structured_outputs_in_reasoning,
+    get_model_structural_tag,
+)
 from vllm.tool_parsers.utils import partial_tag_overlap
 
 logger = init_logger(__name__)
@@ -274,3 +278,11 @@ class KimiK2ToolParser(ToolParser):
         except Exception:
             logger.exception("Error trying to handle streaming tool call.")
             return None
+
+    def get_structural_tag(self, request: ChatCompletionRequest):
+        return get_model_structural_tag(
+            model="kimi_k2",
+            tools=request.tools,
+            tool_choice=request.tool_choice,
+            reasoning=get_enable_structured_outputs_in_reasoning(),
+        )

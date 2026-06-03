@@ -31,6 +31,7 @@ from vllm.sampling_params import (
     StructuredOutputsParams,
 )
 from vllm.tokenizers import TokenizerLike
+from vllm.tool_parsers.structural_tag_registry import StructuralTag
 from vllm.tool_parsers.utils import Tool, get_json_schema_from_tools
 from vllm.utils.collection_utils import is_list_of
 from vllm.utils.import_utils import import_from_path
@@ -150,7 +151,9 @@ class ToolParser:
 
         return request
 
-    def get_structural_tag(self, request: ChatCompletionRequest):
+    def get_structural_tag(
+        self, request: ChatCompletionRequest
+    ) -> StructuralTag | None:
         return None
 
     def extract_tool_calls(
