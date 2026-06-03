@@ -8,11 +8,13 @@
 from collections.abc import Callable
 from typing import Any, Literal, TypeAlias
 
+import regex as re
 from xgrammar import StructuralTag
 from xgrammar.structural_tag import (
     AnyTextFormat,
     ConstStringFormat,
     JSONSchemaFormat,
+    RegexFormat,
     SequenceFormat,
     TagFormat,
     TagsWithSeparatorFormat,
@@ -340,39 +342,49 @@ def get_kimi_k2_structural_tag(
 
     tool_call_begin = "<|tool_call_begin|>"
     tool_call_argument_begin = "<|tool_call_argument_begin|>"
-    tool_call_end = "<|tool_call_end|>\n"
-    tool_calls_prefix = "\n\n"
-    tool_calls_section_begin = "<|tool_calls_section_begin|>\n"
+    tool_call_end = "<|tool_call_end|>"
+    tool_calls_section_begin = "<|tool_calls_section_begin|>"
     tool_calls_section_end = "<|tool_calls_section_end|>"
-    tool_calls_section_trigger = "<|tool_calls_section_begin|>"
     think_tag_end = "</think>"
     think_exclude_tokens = ["<think>", "</think>"]
     parameters_style = "json"
+
+    def build_tool_call_sequence(
+        function_name: str, parameters: dict[str, Any] | bool
+    ) -> SequenceFormat:
+        begin_pattern = (
+            re.escape(tool_call_begin)
+            + r"(?:functions\.)?"
+            + re.escape(function_name)
+            + r"(?::\d+)?"
+            + re.escape(tool_call_argument_begin)
+        )
+        return SequenceFormat(
+            elements=[
+                RegexFormat(pattern=begin_pattern),
+                JSONSchemaFormat(
+                    json_schema=parameters,
+                    style=parameters_style,
+                ),
+                ConstStringFormat(value=tool_call_end),
+            ]
+        )
 
     if tool_choice == "auto":
         tags = []
         for tool in tools:
             function = tool.function
             parameters = _get_function_parameters(function)
-            tags.append(
-                TagFormat(
-                    begin=tool_call_begin + function.name + tool_call_argument_begin,
-                    content=JSONSchemaFormat(
-                        json_schema=parameters,
-                        style=parameters_style,
-                    ),
-                    end=tool_call_end,
-                )
-            )
+            tags.append(build_tool_call_sequence(function.name, parameters))
 
         if tags:
             function_calling_tags = TagsWithSeparatorFormat(
                 tags=tags,
-                separator="\n",
+                separator="",
                 at_least_one=True,
             )
             suffix_tag = TriggeredTagsFormat(
-                triggers=[tool_calls_section_trigger],
+                triggers=[tool_calls_section_begin],
                 tags=[
                     TagFormat(
                         begin=tool_calls_section_begin,
@@ -391,14 +403,9 @@ def get_kimi_k2_structural_tag(
         function = tools[0].function
         suffix_tag = SequenceFormat(
             elements=[
-                ConstStringFormat(value=tool_calls_prefix + tool_calls_section_begin),
-                TagFormat(
-                    begin=tool_call_begin + function.name + tool_call_argument_begin,
-                    content=JSONSchemaFormat(
-                        json_schema=_get_function_parameters(function),
-                        style=parameters_style,
-                    ),
-                    end=tool_call_end,
+                ConstStringFormat(value=tool_calls_section_begin),
+                build_tool_call_sequence(
+                    function.name, _get_function_parameters(function)
                 ),
                 ConstStringFormat(value=tool_calls_section_end),
             ]
@@ -409,23 +416,14 @@ def get_kimi_k2_structural_tag(
         for tool in tools:
             function = tool.function
             parameters = _get_function_parameters(function)
-            tags.append(
-                TagFormat(
-                    begin=tool_call_begin + function.name + tool_call_argument_begin,
-                    content=JSONSchemaFormat(
-                        json_schema=parameters,
-                        style=parameters_style,
-                    ),
-                    end=tool_call_end,
-                )
-            )
+            tags.append(build_tool_call_sequence(function.name, parameters))
         assert len(tags) > 0
         suffix_tag = SequenceFormat(
             elements=[
-                ConstStringFormat(value=tool_calls_prefix + tool_calls_section_begin),
+                ConstStringFormat(value=tool_calls_section_begin),
                 TagsWithSeparatorFormat(
                     tags=tags,
-                    separator="\n",
+                    separator="",
                     at_least_one=True,
                 ),
                 ConstStringFormat(value=tool_calls_section_end),
