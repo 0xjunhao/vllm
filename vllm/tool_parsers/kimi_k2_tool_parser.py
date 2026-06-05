@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import json
 from collections.abc import Sequence
 
 import regex as re
@@ -93,11 +94,31 @@ class KimiK2ToolParser(ToolParser):
                 # the other is None
                 function_call_tuples = self.tool_call_regex.findall(model_output)
 
+                if not function_call_tuples:
+                    logger.warning(
+                        "Tool-call section found, but no complete tool call was parsed."
+                    )
+                    return ExtractedToolCallInformation(
+                        tools_called=False,
+                        tool_calls=[],
+                        content=model_output,
+                    )
+
                 logger.debug("function_call_tuples: %s", function_call_tuples)
 
                 tool_calls = []
                 for match in function_call_tuples:
                     function_id, function_args = match
+
+                    try:
+                        json.loads(function_args)
+                    except json.JSONDecodeError:
+                        logger.warning("Invalid JSON tool arguments: %r", function_args)
+                        return ExtractedToolCallInformation(
+                            tools_called=False,
+                            tool_calls=[],
+                            content=model_output,
+                        )
                     # function_id: functions.get_weather:0 or get_weather:0
                     function_name = function_id.split(":")[0].split(".")[-1]
                     tool_calls.append(
@@ -123,6 +144,11 @@ class KimiK2ToolParser(ToolParser):
                     tools_called=False, tool_calls=[], content=model_output
                 )
 
+    def _reset_streaming_state(self) -> None:
+        self._sent_content_idx = 0
+        self.prev_tool_call_arr = []
+        self.streamed_args_for_tool = []
+
     def _extract_content(self, current_text: str) -> str | None:
         """Return unsent content before the tool-calls section, or None.
 
@@ -141,12 +167,12 @@ class KimiK2ToolParser(ToolParser):
             return content
         return None
 
-    def _extract_tool_calls(self, current_text: str) -> list[str]:
+    def _extract_tool_calls(self, current_text: str) -> list[tuple[str, bool]]:
         """Extract raw bodies from ``<|tool_call_begin|>…<|tool_call_end|>`` blocks."""
         if self.tool_calls_start_token not in current_text:
             return []
 
-        results: list[str] = []
+        results: list[tuple[str, bool]] = []
         pos = current_text.index(self.tool_calls_start_token)
         while True:
             start = current_text.find(self.tool_call_start_token, pos)
@@ -157,16 +183,14 @@ class KimiK2ToolParser(ToolParser):
 
             if end != -1:
                 tool_call = current_text[tc_start:end]
+                results.append((tool_call, True))
                 pos = end + len(self.tool_call_end_token)
             else:
                 tool_call = current_text[tc_start:]
                 overlap = partial_tag_overlap(tool_call, self.tool_call_end_token)
                 if overlap:
                     tool_call = tool_call[:-overlap]
-
-            results.append(tool_call)
-
-            if end == -1:
+                results.append((tool_call, False))
                 break
         return results
 
@@ -223,12 +247,14 @@ class KimiK2ToolParser(ToolParser):
         request: ChatCompletionRequest,
     ) -> DeltaMessage | None:
         try:
+            if not previous_text and not previous_token_ids:
+                self._reset_streaming_state()
             # Extract any content before tool calls.
             content = self._extract_content(current_text)
             tool_calls = self._extract_tool_calls(current_text)
             tool_call_deltas: list[DeltaToolCall] = []
 
-            for i, tool_call in enumerate(tool_calls):
+            for i, (tool_call, is_complete) in enumerate(tool_calls):
                 # First time seeing tool call at index i.
                 if i >= len(self.prev_tool_call_arr):
                     # Initialize streaming state.
@@ -255,6 +281,18 @@ class KimiK2ToolParser(ToolParser):
                             ),
                         )
                     )
+
+                if not is_complete:
+                    continue
+
+                if tool_args is not None:
+                    try:
+                        json.loads(tool_args)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "Skipping incomplete or invalid tool args: %r", tool_args
+                        )
+                        continue
 
                 # Stream back new tool args by diffing against what was sent.
                 args_diff = self._compute_args_diff(i, tool_args)

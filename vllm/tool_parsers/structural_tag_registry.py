@@ -391,7 +391,8 @@ def get_kimi_k2_structural_tag(
             )
         else:
             suffix_tag = AnyTextFormat(
-                excludes=think_exclude_tokens + [tool_calls_section_begin]
+                excludes=think_exclude_tokens
+                + [tool_calls_section_begin, tool_call_begin]
             )
 
     elif tool_choice == "forced":
