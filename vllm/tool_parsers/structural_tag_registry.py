@@ -8,13 +8,11 @@
 from collections.abc import Callable
 from typing import Any, Literal, TypeAlias
 
-import regex as re
 from xgrammar import StructuralTag
 from xgrammar.structural_tag import (
     AnyTextFormat,
     ConstStringFormat,
     JSONSchemaFormat,
-    RegexFormat,
     SequenceFormat,
     TagFormat,
     TagsWithSeparatorFormat,
@@ -24,6 +22,7 @@ from xgrammar.structural_tag import (
 from vllm.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionNamedToolChoiceParam,
     ChatCompletionToolsParam,
+    FunctionDefinition,
 )
 
 SimplifiedToolChoice = Literal["auto", "required", "forced"]
@@ -347,42 +346,37 @@ def get_kimi_k2_structural_tag(
     tool_calls_section_end = "<|tool_calls_section_end|>"
     think_tag_end = "</think>"
     think_exclude_tokens = ["<think>", "</think>"]
-    parameters_style = "json"
 
-    def build_tool_call_sequence(
-        function_name: str, parameters: dict[str, Any] | bool
-    ) -> SequenceFormat:
-        begin_pattern = (
-            re.escape(tool_call_begin)
-            + r"(?:functions\.)?"
-            + re.escape(function_name)
-            + r"(?::\d+)?"
-            + re.escape(tool_call_argument_begin)
-        )
-        return SequenceFormat(
-            elements=[
-                RegexFormat(pattern=begin_pattern),
-                JSONSchemaFormat(
-                    json_schema=parameters,
-                    style=parameters_style,
-                ),
-                ConstStringFormat(value=tool_call_end),
-            ]
+    def build_tool_call_tag(function: FunctionDefinition) -> TagFormat:
+        parameters = _get_function_parameters(function)
+        return TagFormat(
+            begin=tool_call_begin + function.name + ":",
+            content=SequenceFormat(
+                elements=[
+                    JSONSchemaFormat(
+                        json_schema={"type": "integer"},
+                        style="json",
+                    ),
+                    ConstStringFormat(value=tool_call_argument_begin),
+                    JSONSchemaFormat(
+                        json_schema=parameters,
+                        style="json",
+                    ),
+                ]
+            ),
+            end=tool_call_end,
         )
 
     if tool_choice == "auto":
         tags = []
         for tool in tools:
-            function = tool.function
-            parameters = _get_function_parameters(function)
-            seq_format = build_tool_call_sequence(function.name, parameters)
-            tags.append(TagFormat(begin="", content=seq_format, end=""))
+            tags.append(build_tool_call_tag(tool.function))
 
         if tags:
             function_calling_tags = TagsWithSeparatorFormat(
                 tags=tags,
-                separator="",
-                at_least_one=True,
+                separator="\n",
+                at_least_one=False,
             )
             suffix_tag = TriggeredTagsFormat(
                 triggers=[tool_calls_section_begin],
@@ -396,18 +390,17 @@ def get_kimi_k2_structural_tag(
                 excludes=think_exclude_tokens,
             )
         else:
-            suffix_tag = AnyTextFormat(excludes=think_exclude_tokens)
+            suffix_tag = AnyTextFormat(
+                excludes=think_exclude_tokens + [tool_calls_section_begin]
+            )
 
     elif tool_choice == "forced":
         if not tools:
             raise ValueError("Forced tool choice must resolve to exactly one tool.")
-        function = tools[0].function
         suffix_tag = SequenceFormat(
             elements=[
                 ConstStringFormat(value=tool_calls_section_begin),
-                build_tool_call_sequence(
-                    function.name, _get_function_parameters(function)
-                ),
+                build_tool_call_tag(tools[0].function),
                 ConstStringFormat(value=tool_calls_section_end),
             ]
         )
@@ -415,17 +408,14 @@ def get_kimi_k2_structural_tag(
     elif tool_choice == "required":
         tags = []
         for tool in tools:
-            function = tool.function
-            parameters = _get_function_parameters(function)
-            seq_format = build_tool_call_sequence(function.name, parameters)
-            tags.append(TagFormat(begin="", content=seq_format, end=""))
+            tags.append(build_tool_call_tag(tool.function))
         assert len(tags) > 0
         suffix_tag = SequenceFormat(
             elements=[
                 ConstStringFormat(value=tool_calls_section_begin),
                 TagsWithSeparatorFormat(
                     tags=tags,
-                    separator="",
+                    separator="\n",
                     at_least_one=True,
                 ),
                 ConstStringFormat(value=tool_calls_section_end),
