@@ -14,7 +14,6 @@ from openai.types.responses import (
 from openai.types.responses.function_tool import FunctionTool
 
 from vllm.entrypoints.openai.chat_completion.protocol import (
-    ChatCompletionNamedToolChoiceParam,
     ChatCompletionRequest,
     ChatCompletionToolsParam,
 )
@@ -91,8 +90,8 @@ class ToolParser:
         request: ChatCompletionRequest | ResponsesRequest,
     ) -> ChatCompletionRequest | ResponsesRequest:
         # If there are no tools, return the request as is.
-        if not request.tools:
-            return request
+        # if not request.tools:
+        #     return request
 
         # Step 1 (highest priority for ChatCompletionRequest): apply
         # vLLM-owned structural tag support for model-specific tool formats.
@@ -100,23 +99,23 @@ class ToolParser:
             isinstance(request, ChatCompletionRequest)
             and VLLM_ENFORCE_STRICT_TOOL_CALLING
         ):
-            need_tool_calling = (
-                request.tool_choice == "auto"
-                or request.tool_choice == "required"
-                or isinstance(request.tool_choice, ChatCompletionNamedToolChoiceParam)
-            )
-            if need_tool_calling:
-                structure_tag = self.get_structural_tag(request)
-                if structure_tag is not None:
-                    if request.structured_outputs is None:
-                        request.structured_outputs = StructuredOutputsParams(
-                            structural_tag=json.dumps(structure_tag.model_dump()),
-                        )
-                    else:
-                        request.structured_outputs.structural_tag = json.dumps(
-                            structure_tag.model_dump()
-                        )
-                    return request
+            # need_tool_calling = (
+            #     request.tool_choice == "auto"
+            #     or request.tool_choice == "required"
+            #     or isinstance(request.tool_choice, ChatCompletionNamedToolChoiceParam)
+            # )
+            # if need_tool_calling:
+            structure_tag = self.get_structural_tag(request)
+            if structure_tag is not None:
+                if request.structured_outputs is None:
+                    request.structured_outputs = StructuredOutputsParams(
+                        structural_tag=json.dumps(structure_tag.model_dump()),
+                    )
+                else:
+                    request.structured_outputs.structural_tag = json.dumps(
+                        structure_tag.model_dump()
+                    )
+                return request
 
         # Step 2: set structured output params when tool constraints are
         # derived from the tool schema.
