@@ -154,12 +154,12 @@ class KimiK2ToolParser(ToolParser):
             return content
         return None
 
-    def _extract_tool_calls(self, current_text: str) -> list[str]:
+    def _extract_tool_calls(self, current_text: str) -> list[tuple[str, bool]]:
         """Extract raw bodies from ``<|tool_call_begin|>…<|tool_call_end|>`` blocks."""
         if self.tool_calls_start_token not in current_text:
             return []
 
-        results: list[str] = []
+        results: list[tuple[str, bool]] = []
         pos = current_text.index(self.tool_calls_start_token)
         while True:
             start = current_text.find(self.tool_call_start_token, pos)
@@ -170,16 +170,14 @@ class KimiK2ToolParser(ToolParser):
 
             if end != -1:
                 tool_call = current_text[tc_start:end]
+                results.append((tool_call, True))
                 pos = end + len(self.tool_call_end_token)
             else:
                 tool_call = current_text[tc_start:]
                 overlap = partial_tag_overlap(tool_call, self.tool_call_end_token)
                 if overlap:
                     tool_call = tool_call[:-overlap]
-
-            results.append(tool_call)
-
-            if end == -1:
+                results.append((tool_call, False))
                 break
         return results
 
@@ -241,7 +239,10 @@ class KimiK2ToolParser(ToolParser):
             tool_calls = self._extract_tool_calls(current_text)
             tool_call_deltas: list[DeltaToolCall] = []
 
-            for i, tool_call in enumerate(tool_calls):
+            for i, (tool_call, is_complete) in enumerate(tool_calls):
+                if not is_complete:
+                    break
+
                 # First time seeing tool call at index i.
                 if i >= len(self.prev_tool_call_arr):
                     # Initialize streaming state.
