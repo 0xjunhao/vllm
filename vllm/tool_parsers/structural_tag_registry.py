@@ -64,8 +64,8 @@ def get_model_structural_tag(
         tools=tools,
         tool_choice=tool_choice,
     )
-    if not normalized_tools:
-        return None
+    # if not normalized_tools:
+    #     return None
 
     return builder(normalized_tools, simplified_tool_choice, reasoning)
 
