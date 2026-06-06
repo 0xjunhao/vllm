@@ -255,20 +255,35 @@ class KimiK2ToolParser(ToolParser):
             tool_call_deltas: list[DeltaToolCall] = []
 
             for i, (tool_call, is_complete) in enumerate(tool_calls):
+                if not is_complete:
+                    break
+
+                header, tool_args = self._split_tool_call(tool_call)
+                tool_id, tool_name = self._extract_tool_id_and_name(header)
+
+                if not tool_id or not tool_name or tool_args is None:
+                    break
+
+                try:
+                    json.loads(tool_args)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Closed tool call has invalid JSON args: %r", tool_args
+                    )
+                    break
+
                 # First time seeing tool call at index i.
                 if i >= len(self.prev_tool_call_arr):
                     # Initialize streaming state.
                     self.prev_tool_call_arr.append({})
                     self.streamed_args_for_tool.append("")
 
-                header, tool_args = self._split_tool_call(tool_call)
-
                 # Stream back tool name.
                 if "name" not in self.prev_tool_call_arr[i]:
-                    tool_id, tool_name = self._extract_tool_id_and_name(header)
-                    if not tool_name:
-                        # Can't skip to tool i+1 if i isn't ready
-                        break
+                    # tool_id, tool_name = self._extract_tool_id_and_name(header)
+                    # if not tool_name:
+                    #     # Can't skip to tool i+1 if i isn't ready
+                    #     break
                     self.prev_tool_call_arr[i]["name"] = tool_name
                     self.prev_tool_call_arr[i]["id"] = tool_id
                     tool_call_deltas.append(
@@ -282,17 +297,17 @@ class KimiK2ToolParser(ToolParser):
                         )
                     )
 
-                if not is_complete:
-                    continue
+                # if not is_complete:
+                #     continue
 
-                if tool_args is not None:
-                    try:
-                        json.loads(tool_args)
-                    except json.JSONDecodeError:
-                        logger.warning(
-                            "Skipping incomplete or invalid tool args: %r", tool_args
-                        )
-                        continue
+                # if tool_args is not None:
+                #     try:
+                #         json.loads(tool_args)
+                #     except json.JSONDecodeError:
+                #         logger.warning(
+                #             "Skipping incomplete or invalid tool args: %r", tool_args
+                #         )
+                #         continue
 
                 # Stream back new tool args by diffing against what was sent.
                 args_diff = self._compute_args_diff(i, tool_args)
