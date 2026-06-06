@@ -19,6 +19,9 @@ from vllm.entrypoints.openai.engine.protocol import (
 )
 from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
 from vllm.logger import init_logger
+from vllm.sampling_params import (
+    StructuredOutputsParams,
+)
 from vllm.tokenizers import TokenizerLike
 from vllm.tool_parsers.abstract_tool_parser import (
     Tool,
@@ -69,10 +72,21 @@ class KimiK2ToolParser(ToolParser):
         self, request: ChatCompletionRequest | ResponsesRequest
     ) -> ChatCompletionRequest | ResponsesRequest:
         request = super().adjust_request(request)
-        if request.tools and request.tool_choice != "none":
-            # Ensure special-token markers appear as literal text in
-            # current_text so we can do pure text-based parsing.
-            request.skip_special_tokens = False
+        request.skip_special_tokens = False
+        # if request.tools and request.tool_choice != "none":
+        # Ensure special-token markers appear as literal text in
+        # current_text so we can do pure text-based parsing.
+        # request.skip_special_tokens = False
+        structure_tag = self.get_structural_tag(request)
+        if structure_tag is not None:
+            if request.structured_outputs is None:
+                request.structured_outputs = StructuredOutputsParams(
+                    structural_tag=json.dumps(structure_tag.model_dump()),
+                )
+            else:
+                request.structured_outputs.structural_tag = json.dumps(
+                    structure_tag.model_dump()
+                )
         return request
 
     def extract_tool_calls(
