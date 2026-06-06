@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import json
 from collections.abc import Sequence
 
 import regex as re
@@ -18,10 +19,17 @@ from vllm.entrypoints.openai.engine.protocol import (
 )
 from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
 from vllm.logger import init_logger
+from vllm.sampling_params import (
+    StructuredOutputsParams,
+)
 from vllm.tokenizers import TokenizerLike
 from vllm.tool_parsers.abstract_tool_parser import (
     Tool,
     ToolParser,
+)
+from vllm.tool_parsers.structural_tag_registry import (
+    get_enable_structured_outputs_in_reasoning,
+    get_model_structural_tag,
 )
 from vllm.tool_parsers.utils import partial_tag_overlap
 
@@ -29,6 +37,8 @@ logger = init_logger(__name__)
 
 
 class KimiK2ToolParser(ToolParser):
+    IS_KIMI_K2_TOOL_PARSER = True
+
     def __init__(self, tokenizer: TokenizerLike, tools: list[Tool] | None = None):
         super().__init__(tokenizer, tools)
 
@@ -64,10 +74,17 @@ class KimiK2ToolParser(ToolParser):
         self, request: ChatCompletionRequest | ResponsesRequest
     ) -> ChatCompletionRequest | ResponsesRequest:
         request = super().adjust_request(request)
-        if request.tools and request.tool_choice != "none":
-            # Ensure special-token markers appear as literal text in
-            # current_text so we can do pure text-based parsing.
-            request.skip_special_tokens = False
+        request.skip_special_tokens = False
+        structure_tag = self.get_structural_tag(request)
+        if structure_tag is not None:
+            if request.structured_outputs is None:
+                request.structured_outputs = StructuredOutputsParams(
+                    structural_tag=json.dumps(structure_tag.model_dump()),
+                )
+            else:
+                request.structured_outputs.structural_tag = json.dumps(
+                    structure_tag.model_dump()
+                )
         return request
 
     def extract_tool_calls(
@@ -274,3 +291,11 @@ class KimiK2ToolParser(ToolParser):
         except Exception:
             logger.exception("Error trying to handle streaming tool call.")
             return None
+
+    def get_structural_tag(self, request: ChatCompletionRequest):
+        return get_model_structural_tag(
+            model="kimi_k2",
+            tools=request.tools,
+            tool_choice=request.tool_choice,
+            reasoning=get_enable_structured_outputs_in_reasoning(),
+        )

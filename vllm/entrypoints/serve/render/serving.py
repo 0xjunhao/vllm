@@ -594,7 +594,14 @@ class OpenAIServingRender:
                 and is_mistral_tokenizer(tokenizer)
                 and tokenizer.supports_grammar
             )
-            if tool_choice != "none" or is_mistral_grammar_eligible:
+            is_kimi_k2_tool_parser = getattr(
+                tool_parser, "IS_KIMI_K2_TOOL_PARSER", False
+            )
+            if (
+                tool_choice != "none"
+                or is_mistral_grammar_eligible
+                or is_kimi_k2_tool_parser
+            ):
                 if not isinstance(request, ChatCompletionRequest | ResponsesRequest):
                     msg = (
                         "Tool usage is only supported "
