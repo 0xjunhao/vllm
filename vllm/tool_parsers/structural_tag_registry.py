@@ -6,7 +6,7 @@
 # https://github.com/mlc-ai/xgrammar/blob/main/python/xgrammar/builtin_structural_tag.py
 
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 from xgrammar import StructuralTag
 from xgrammar.structural_tag import (
@@ -22,10 +22,11 @@ from xgrammar.structural_tag import (
 from vllm.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionNamedToolChoiceParam,
     ChatCompletionToolsParam,
+    FunctionDefinition,
 )
 
 SimplifiedToolChoice = Literal["auto", "required", "forced"]
-ToolChoice = (
+ToolChoice: TypeAlias = (
     Literal["none", "auto", "required"] | ChatCompletionNamedToolChoiceParam | None
 )
 StructuralTagBuilder = Callable[
@@ -63,8 +64,6 @@ def get_model_structural_tag(
         tools=tools,
         tool_choice=tool_choice,
     )
-    if not normalized_tools:
-        return None
 
     return builder(normalized_tools, simplified_tool_choice, reasoning)
 
@@ -328,3 +327,102 @@ def get_qwen_3_5_structural_tag(
         result = StructuralTag(format=SequenceFormat(elements=[prefix_tag, suffix_tag]))
 
     return result
+
+
+@register_model_structural_tag("kimi_k2")
+def get_kimi_k2_structural_tag(
+    tools: list[ChatCompletionToolsParam],
+    tool_choice: SimplifiedToolChoice,
+    reasoning: bool,
+) -> StructuralTag:
+    """Build Kimi K2 structural tags."""
+
+    tool_call_begin = "<|tool_call_begin|>"
+    tool_call_argument_begin = "<|tool_call_argument_begin|>"
+    tool_call_end = "<|tool_call_end|>"
+    tool_calls_section_begin = "<|tool_calls_section_begin|>"
+    tool_calls_section_end = "<|tool_calls_section_end|>"
+    think_tag_end = "</think>"
+    think_exclude_tokens = ["<think>", "</think>"]
+
+    def build_tool_call_tag(function: FunctionDefinition) -> TagFormat:
+        parameters = _get_function_parameters(function)
+        return TagFormat(
+            begin=tool_call_begin + function.name + ":",
+            content=SequenceFormat(
+                elements=[
+                    JSONSchemaFormat(
+                        json_schema={"type": "integer"},
+                        style="json",
+                    ),
+                    ConstStringFormat(value=tool_call_argument_begin),
+                    JSONSchemaFormat(
+                        json_schema=parameters,
+                        style="json",
+                    ),
+                ]
+            ),
+            end=tool_call_end,
+        )
+
+    if tool_choice == "auto":
+        tags = []
+        for tool in tools:
+            tags.append(build_tool_call_tag(tool.function))
+
+        if tags:
+            function_calling_tags = TagsWithSeparatorFormat(
+                tags=tags,
+                separator="\n",
+                at_least_one=False,
+            )
+            suffix_tag = TriggeredTagsFormat(
+                triggers=[tool_calls_section_begin],
+                tags=[
+                    TagFormat(
+                        begin=tool_calls_section_begin,
+                        content=function_calling_tags,
+                        end=tool_calls_section_end,
+                    )
+                ],
+                excludes=think_exclude_tokens,
+            )
+        else:
+            suffix_tag = AnyTextFormat(
+                excludes=think_exclude_tokens
+                + [tool_calls_section_begin, tool_call_begin]
+            )
+
+    elif tool_choice == "forced":
+        if not tools:
+            raise ValueError("Forced tool choice must resolve to exactly one tool.")
+        suffix_tag = SequenceFormat(
+            elements=[
+                ConstStringFormat(value=tool_calls_section_begin),
+                build_tool_call_tag(tools[0].function),
+                ConstStringFormat(value=tool_calls_section_end),
+            ]
+        )
+
+    elif tool_choice == "required":
+        tags = []
+        for tool in tools:
+            tags.append(build_tool_call_tag(tool.function))
+        assert len(tags) > 0
+        suffix_tag = SequenceFormat(
+            elements=[
+                ConstStringFormat(value=tool_calls_section_begin),
+                TagsWithSeparatorFormat(
+                    tags=tags,
+                    separator="\n",
+                    at_least_one=True,
+                ),
+                ConstStringFormat(value=tool_calls_section_end),
+            ]
+        )
+
+    if not reasoning:
+        return StructuralTag(format=suffix_tag)
+
+    prefix_tag = TagFormat(begin="", content=AnyTextFormat(), end=think_tag_end)
+    return StructuralTag(format=SequenceFormat(elements=[prefix_tag, suffix_tag]))
