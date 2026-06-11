@@ -31,6 +31,10 @@ on:
         type: boolean
         required: false
         default: false
+      vllm_merge_base_commit:
+        description: 'Upstream vLLM commit hash that precompiled wheels were built from. Required when vllm_use_precompiled is true.'
+        required: false
+        default: ''
 
 env:
   IMAGE_NAME: ubicloud/vllm
@@ -170,5 +174,6 @@ jobs:
             nvcc_threads=2
             torch_cuda_arch_list=${{ inputs.torch_cuda_arch_list }}
             VLLM_USE_PRECOMPILED=${{ steps.args.outputs.precompiled }}
+            VLLM_MERGE_BASE_COMMIT=${{ inputs.vllm_merge_base_commit }}
             RUN_WHEEL_CHECK=false
           provenance: false
