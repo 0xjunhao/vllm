@@ -14,17 +14,20 @@ generation. Supported dataset types include:
 
 import argparse
 import ast
+import concurrent.futures
 import io
 import json
 import logging
 import math
 import random
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from functools import cache
 from io import BytesIO
+from itertools import repeat
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, cast
@@ -587,6 +590,7 @@ class RandomDataset(BenchmarkDataset):
         max_loras: int | None = None,
         lora_path: str | None = None,
         lora_assignment: str = "random",
+        num_workers: int = 1,
         **kwargs,
     ) -> list[SampleRequest]:
         resolved_input_rr, _ = _resolve_range_ratios(range_ratio)
@@ -626,19 +630,35 @@ class RandomDataset(BenchmarkDataset):
         # Generate prefix once
         prefix_token_ids = self.get_prefix(tokenizer, allowed_tokens, prefix_len)
 
+        # Parallel generation of token sequences
+        per_request_seeds = self._rng.integers(0, 2**63, size=num_requests)
+        rngs = [np.random.default_rng(int(seed)) for seed in per_request_seeds]
+        start_time = time.perf_counter()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as pool:
+            sequences = list(
+                pool.map(
+                    self.generate_token_sequence,
+                    repeat(tokenizer),
+                    repeat(prefix_token_ids),
+                    repeat(prefix_len),
+                    repeat(vocab_size),
+                    [int(x) for x in input_lens[:num_requests]],
+                    [int(x) for x in offsets[:num_requests]],
+                    range(num_requests),
+                    repeat(allowed_tokens),
+                    rngs,
+                )
+            )
+        logger.info(
+            "Generated %d random sequences in %.3fs using %d worker(s).",
+            num_requests,
+            time.perf_counter() - start_time,
+            num_workers,
+        )
+
         requests = []
         token_mismatch_total = 0
-        for i in range(num_requests):
-            prompt, total_input_len, token_mismatch = self.generate_token_sequence(  # noqa: E501
-                tokenizer=tokenizer,
-                prefix_token_ids=prefix_token_ids,
-                prefix_len=prefix_len,
-                vocab_size=vocab_size,
-                input_len=int(input_lens[i]),
-                offset=int(offsets[i]),
-                index=i,
-                allowed_tokens=allowed_tokens,
-            )
+        for i, (prompt, total_input_len, token_mismatch) in enumerate(sequences):
             token_mismatch_total += token_mismatch
             lora_req = self.get_lora_request(
                 index=i,
@@ -719,7 +739,6 @@ class RandomDataset(BenchmarkDataset):
 
     def generate_token_sequence(
         self,
-        *,
         tokenizer: TokenizerLike,
         prefix_token_ids: list[int],
         prefix_len: int,
@@ -728,6 +747,7 @@ class RandomDataset(BenchmarkDataset):
         offset: int,
         index: int,
         allowed_tokens: np.ndarray,
+        rng: np.random.Generator | None = None,
     ) -> tuple[str, int, int]:
         """
         Returns (prompt, total_input_len).
@@ -756,7 +776,7 @@ class RandomDataset(BenchmarkDataset):
                 token_sequence=token_sequence,
                 target_token_len=total_input_len,
                 add_special_tokens=False,
-                rng=self._rng,
+                rng=rng if rng is not None else self._rng,
             )
         )
         total_input_len = len(adjusted_token_sequence)
@@ -1939,6 +1959,15 @@ def add_random_dataset_base_args(
         help=("Batch size for random sampling. Only used for embeddings benchmark."),
     )
     parser_or_group.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of worker threads used to build random prompts for "
+            "random datasets. Defaults to 1."
+        ),
+    )
+    parser_or_group.add_argument(
         "--no-reranker",
         action="store_true",
         help=(
@@ -2351,6 +2380,7 @@ def get_samples(args, tokenizer: TokenizerLike) -> list[SampleRequest]:
                 input_len=args.random_input_len,
                 output_len=args.random_output_len,
                 range_ratio=args.random_range_ratio,
+                num_workers=args.num_workers,
                 request_id_prefix=args.request_id_prefix,
                 batchsize=args.random_batch_size,
                 no_oversample=args.no_oversample,
