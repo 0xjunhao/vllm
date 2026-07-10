@@ -176,4 +176,5 @@ jobs:
             VLLM_USE_PRECOMPILED=${{ steps.args.outputs.precompiled }}
             VLLM_MERGE_BASE_COMMIT=${{ inputs.vllm_merge_base_commit }}
             RUN_WHEEL_CHECK=false
+            INSTALL_KV_CONNECTORS=true
           provenance: false
