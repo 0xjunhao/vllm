@@ -382,7 +382,6 @@ class KimiK25ForConditionalGeneration(
         self.media_placeholder: int = self.config.media_placeholder_token_id
 
         # MoE hyperparameters for EPLB
-        self.expert_weights = self.language_model.expert_weights
         self.num_expert_groups = self.language_model.num_expert_groups
         self.num_logical_experts = self.language_model.num_logical_experts
         self.num_physical_experts = self.language_model.num_physical_experts
