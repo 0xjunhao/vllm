@@ -23,6 +23,7 @@ from vllm.model_executor.layers.quantization.compressed_tensors import (
     compressed_tensors,
 )
 from vllm.model_executor.models.interfaces import (
+    MixtureOfExperts,
     SupportsEagle,
     SupportsEagle3,
     SupportsMultiModal,
@@ -288,6 +289,7 @@ class KimiK25MultiModalProcessor(BaseMultiModalProcessor[KimiK25ProcessingInfo])
 )
 class KimiK25ForConditionalGeneration(
     nn.Module,
+    MixtureOfExperts,
     SupportsMultiModal,
     SupportsPP,
     SupportsQuant,
@@ -378,6 +380,19 @@ class KimiK25ForConditionalGeneration(
             self.language_model.make_empty_intermediate_tensors
         )
         self.media_placeholder: int = self.config.media_placeholder_token_id
+
+        # MoE hyperparameters for EPLB
+        self.expert_weights = self.language_model.expert_weights
+        self.num_expert_groups = self.language_model.num_expert_groups
+        self.num_logical_experts = self.language_model.num_logical_experts
+        self.num_physical_experts = self.language_model.num_physical_experts
+        self.num_local_physical_experts = self.language_model.num_local_physical_experts
+        self.num_routed_experts = self.language_model.num_routed_experts
+        self.num_shared_experts = self.language_model.num_shared_experts
+        self.num_redundant_experts = self.language_model.num_redundant_experts
+        self.moe_layers = self.language_model.moe_layers
+        self.num_moe_layers = len(self.moe_layers)
+        self.set_eplb_state = self.language_model.set_eplb_state
 
     def _maybe_ignore_quant_config(self, quant_config: QuantizationConfig):
         if isinstance(quant_config, compressed_tensors.CompressedTensorsConfig):
@@ -473,3 +488,15 @@ class KimiK25ForConditionalGeneration(
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]):
         loader = AutoWeightsLoader(self)
         return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
+
+    def update_physical_experts_metadata(
+        self,
+        num_physical_experts: int,
+        num_local_physical_experts: int,
+    ) -> None:
+        self.language_model.update_physical_experts_metadata(
+            num_physical_experts=num_physical_experts,
+            num_local_physical_experts=num_local_physical_experts,
+        )
+        self.num_physical_experts = num_physical_experts
+        self.num_local_physical_experts = num_local_physical_experts
