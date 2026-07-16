@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import threading
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -139,6 +140,177 @@ class AgRsAll2AllManager(All2AllManagerBase):
 
     def destroy(self):
         pass
+
+
+class PyTorchModularAll2AllManager(All2AllManagerBase):
+    def __init__(self, cpu_group, tcp_store_group=None):
+        super().__init__(cpu_group, tcp_store_group)
+        self.num_experts = None
+        self.metadata_queue = deque()
+
+    def dispatch(
+        self,
+        hidden_states: torch.Tensor,
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
+        is_sequence_parallel: bool = False,
+        extra_tensors: list[torch.Tensor] | None = None,
+    ) -> (
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        | tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[torch.Tensor]]
+    ):
+        """
+        Sparse All-to-All token dispatch. Replicates tokens for Top-K choices,
+        groups them by destination EP rank, and sends them.
+        """
+        dist_group = get_ep_group() if is_sequence_parallel else get_dp_group()
+        world_size = dist_group.size()
+
+        N, K = topk_ids.shape
+        H = hidden_states.shape[1]
+
+        # 1. Determine global expert pool size dynamically if not already cached
+        if self.num_experts is None:
+            local_max = (
+                topk_ids.max()
+                if topk_ids.numel() > 0
+                else torch.tensor(-1, device=topk_ids.device)
+            )
+            dist.all_reduce(local_max, op=dist.ReduceOp.MAX, group=dist_group)
+            max_expert = local_max.item()
+            self.num_experts = (
+                world_size
+                if max_expert < 0
+                else int(((max_expert // world_size) + 1) * world_size)
+            )
+
+        num_experts_per_rank = self.num_experts // world_size
+
+        # 2. Replicate hidden states and weights K times for Top-K distribution
+        flat_topk_ids = topk_ids.flatten()
+        flat_topk_weights = topk_weights.flatten()
+        flat_hidden_states = hidden_states.repeat_interleave(K, dim=0)
+
+        target_ranks = torch.clamp(
+            flat_topk_ids // num_experts_per_rank, 0, world_size - 1
+        )
+
+        # 3. Sort arrays contiguously by destination rank to prepare for chunk-splitting
+        _, permutation = torch.sort(target_ranks, stable=True)
+        sorted_hs = flat_hidden_states[permutation]
+        sorted_weights = flat_topk_weights[permutation]
+        sorted_ids = flat_topk_ids[permutation]
+
+        flat_extra_tensors = []
+        if extra_tensors is not None:
+            for t in extra_tensors:
+                flat_t = (
+                    t.repeat_interleave(K, dim=0)[permutation]
+                    if t.shape[0] == N
+                    else t[permutation]
+                )
+                flat_extra_tensors.append(flat_t)
+
+        # 4. Exchange send/receive sizes across ranks
+        send_counts = torch.bincount(target_ranks, minlength=world_size)
+        send_counts_list = send_counts.tolist()
+
+        recv_counts = torch.empty_like(send_counts)
+        dist.all_to_all_single(recv_counts, send_counts, group=dist_group)
+        recv_counts_list = recv_counts.tolist()
+
+        # 5. Execute sparse routing transfer
+        total_recv = sum(recv_counts_list)
+        disp_hs = torch.empty(
+            [total_recv, H], dtype=hidden_states.dtype, device=hidden_states.device
+        )
+        dist.all_to_all_single(
+            disp_hs, sorted_hs, recv_counts_list, send_counts_list, group=dist_group
+        )
+
+        disp_weights = torch.empty(
+            [total_recv], dtype=topk_weights.dtype, device=topk_weights.device
+        )
+        dist.all_to_all_single(
+            disp_weights,
+            sorted_weights,
+            recv_counts_list,
+            send_counts_list,
+            group=dist_group,
+        )
+
+        disp_ids = torch.empty(
+            [total_recv], dtype=topk_ids.dtype, device=topk_ids.device
+        )
+        dist.all_to_all_single(
+            disp_ids, sorted_ids, recv_counts_list, send_counts_list, group=dist_group
+        )
+
+        disp_extras = []
+        for flat_t in flat_extra_tensors:
+            disp_t = torch.empty(
+                [total_recv] + list(flat_t.shape[1:]),
+                dtype=flat_t.dtype,
+                device=flat_t.device,
+            )
+            dist.all_to_all_single(
+                disp_t, flat_t, recv_counts_list, send_counts_list, group=dist_group
+            )
+            disp_extras.append(disp_t)
+
+        # 6. Save tracking metadata to reconstruct tokens back in the combine phase
+        self.metadata_queue.append(
+            {
+                "send_counts": send_counts_list,
+                "recv_counts": recv_counts_list,
+                "permutation": permutation,
+                "N": N,
+                "K": K,
+                "H": H,
+            }
+        )
+
+        # Ensure returned dispatched arrays are shaped as standard 2D tensors (total_recv, 1)
+        disp_weights = disp_weights.unsqueeze(-1)
+        disp_ids = disp_ids.unsqueeze(-1)
+
+        if extra_tensors is not None:
+            return disp_hs, disp_weights, disp_ids, disp_extras
+        return disp_hs, disp_weights, disp_ids
+
+    def combine(
+        self, hidden_states: torch.Tensor, is_sequence_parallel: bool = False
+    ) -> torch.Tensor:
+        """
+        Routes the calculated expert outputs back to their source ranks
+        and performs the final Top-K weighted reduction.
+        """
+        dist_group = get_ep_group() if is_sequence_parallel else get_dp_group()
+
+        meta = self.metadata_queue.popleft()
+        send_counts = meta["send_counts"]
+        recv_counts = meta["recv_counts"]
+        permutation = meta["permutation"]
+        N, K, H = meta["N"], meta["K"], meta["H"]
+
+        # 1. Reverse routing transfer
+        total_send = sum(send_counts)
+        combined_flat = torch.empty(
+            [total_send, H], dtype=hidden_states.dtype, device=hidden_states.device
+        )
+        dist.all_to_all_single(
+            combined_flat, hidden_states, send_counts, recv_counts, group=dist_group
+        )
+
+        # 2. Revert target-rank permutation mapping
+        original_flat = torch.empty_like(combined_flat)
+        original_flat[permutation] = combined_flat
+
+        # 3. Reshape and sum along the Top-K dimension to output final (N, H) states
+        return original_flat.view(N, K, H).sum(dim=1)
+
+    def destroy(self):
+        self.metadata_queue.clear()
 
 
 class DeepEPAll2AllManagerBase(All2AllManagerBase):
