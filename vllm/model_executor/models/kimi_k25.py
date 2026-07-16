@@ -391,9 +391,6 @@ class KimiK25ForConditionalGeneration(
         self.num_redundant_experts = self.language_model.num_redundant_experts
         self.moe_layers = self.language_model.moe_layers
         self.num_moe_layers = len(self.moe_layers)
-        self.expert_weights = []
-        for layer_idx, layer in enumerate(self.moe_layers):
-            self.expert_weights.append(layer.get_expert_weights())
 
     def _maybe_ignore_quant_config(self, quant_config: QuantizationConfig):
         if isinstance(quant_config, compressed_tensors.CompressedTensorsConfig):
@@ -501,15 +498,3 @@ class KimiK25ForConditionalGeneration(
         )
         self.num_physical_experts = num_physical_experts
         self.num_local_physical_experts = num_local_physical_experts
-
-    def set_eplb_state(
-        self,
-        expert_load_view: torch.Tensor,
-        logical_to_physical_map: torch.Tensor,
-        logical_replica_count: torch.Tensor,
-    ) -> None:
-        self.language_model.set_eplb_state(
-            expert_load_view=expert_load_view,
-            logical_to_physical_map=logical_to_physical_map,
-            logical_replica_count=logical_replica_count,
-        )
