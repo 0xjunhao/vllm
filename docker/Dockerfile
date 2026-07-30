@@ -1094,3 +1094,25 @@ USER vllm
 WORKDIR /home/vllm
 ENTRYPOINT ["/usr/local/bin/vllm-nonroot-entrypoint.sh"]
 #################### OPENAI API SERVER (NON-ROOT, OPT-IN) ####################
+
+#################### UBICLOUD STAGE ####################
+FROM vllm-openai AS vllm-ubicloud
+
+ARG CUDA_VERSION
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        htop \
+        iputils-ping \
+        moreutils \
+        nano \
+        net-tools \
+        parallel \
+        vim \
+        vmtouch \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    CUDA_MAJOR="${CUDA_VERSION%%.*}" \
+    && echo "Ubicloud stage: CUDA_VERSION=${CUDA_VERSION} (major=${CUDA_MAJOR})"
+#################### UBICLOUD STAGE END ####################
