@@ -593,4 +593,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
 
     @property
     def supports_eplb(self) -> bool:
-        return self.wna16_backend == WNA16MoEBackend.MARLIN
+        return (
+            self.wna16_backend == WNA16MoEBackend.MARLIN
+            or self.wna16_backend == WNA16MoEBackend.BATCHED_MARLIN
+        )
