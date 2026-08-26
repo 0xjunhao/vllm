@@ -116,7 +116,7 @@ jobs:
               CUDA_VARIANT="cu129"
               ;;
             13.0)
-              CUDA_FULL="13.0.2"
+              CUDA_FULL="13.0.3"
               CUDA_VARIANT="cu130"
               ;;
             *)
@@ -124,7 +124,7 @@ jobs:
               exit 1
               ;;
           esac
-          BASE_IMAGE="nvidia/cuda:${CUDA_FULL}-devel-ubuntu22.04"
+          BASE_IMAGE="pytorch/manylinux2_28-builder:cuda${{ inputs.cuda_version }}-78e737ad29420ffc4800e677c51e2a852caf8359"
           {
             echo "cuda_full=${CUDA_FULL}"
             echo "cuda_variant=${CUDA_VARIANT}"
