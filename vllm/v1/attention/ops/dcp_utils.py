@@ -110,6 +110,7 @@ def get_dcp_workspace_max_num_tokens(vllm_config: VllmConfig) -> int:
     return min(
         scheduler_config.max_num_batched_tokens,
         max(
+            scheduler_config.max_num_batched_tokens,
             scheduler_config.max_num_seqs * tokens_per_seq,
             vllm_config.compilation_config.max_cudagraph_capture_size or 0,
         ),
