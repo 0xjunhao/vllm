@@ -1386,4 +1386,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN --mount=type=cache,target=/root/.cache/uv \
     CUDA_MAJOR="${CUDA_VERSION%%.*}" \
     && echo "Ubicloud stage: CUDA_VERSION=${CUDA_VERSION} (major=${CUDA_MAJOR})"
+
+# InferenceX AgentX client.
+RUN --mount=type=cache,target=/opt/uv/cache \
+    uv venv /opt/aiperf --python 3.11 \
+    && uv pip install --python /opt/aiperf/bin/python "agentx-harness==1.0.12" "datasets>=4.7.0" \
+    && ln -s /opt/aiperf/bin/aiperf /usr/local/bin/aiperf \
+    && aiperf profile --help | grep -q -- --warmup-requests-per-lane
 #################### UBICLOUD STAGE END ####################
