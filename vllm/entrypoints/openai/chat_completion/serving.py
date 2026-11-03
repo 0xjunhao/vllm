@@ -184,6 +184,9 @@ class OpenAIServingChat(GenerateBaseServing):
             if mc.generation_config not in ("auto", "vllm")
             else getattr(mc, "override_generation_config", {}).get("max_new_tokens")
         )
+        self.override_temperature = getattr(mc, "override_generation_config", {}).get(
+            "temperature"
+        )
         # NOTE(woosuk): While OpenAI's chat completion API supports browsing
         # for some models, currently vLLM doesn't support it. Please use the
         # Responses API instead.
@@ -193,6 +196,15 @@ class OpenAIServingChat(GenerateBaseServing):
         # Please use the Responses API instead.
         self.supports_code_interpreter = False
         self.python_tool = None
+
+    def _apply_override_temperature(
+        self, request: ChatCompletionRequest, chat_template_kwargs: dict[str, Any]
+    ) -> None:
+        thinking = chat_template_kwargs.get(
+            "enable_thinking"
+        ) or chat_template_kwargs.get("thinking")
+        if thinking and self.override_temperature is not None:
+            request.temperature = self.override_temperature
 
     def _effective_chat_template_kwargs(
         self, request: ChatCompletionRequest
@@ -308,6 +320,7 @@ class OpenAIServingChat(GenerateBaseServing):
         tokenizer = self.renderer.tokenizer
         assert tokenizer is not None
         chat_template_kwargs = self._effective_chat_template_kwargs(request)
+        self._apply_override_temperature(request, chat_template_kwargs)
         parser: Parser | None = None
         if self.parser_cls is not None:
             parser = self._make_parser(request, tokenizer, chat_template_kwargs)

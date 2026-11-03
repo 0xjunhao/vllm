@@ -154,6 +154,8 @@ class OpenAIServingChatBatch(OpenAIServingChat):
                 self.override_max_tokens,
             )
             single_request = single_requests[i]
+            chat_template_kwargs = self._effective_chat_template_kwargs(single_request)
+            self._apply_override_temperature(single_request, chat_template_kwargs)
             lora_request = self._maybe_get_adapters(
                 single_request, supports_default_mm_loras=True
             )
