@@ -1888,6 +1888,7 @@ class ModelConfig:
             "top_p",
             "min_p",
             "max_new_tokens",
+            "thinking_token_budget",
             "skip_special_tokens",
         ]
         if any(p in config for p in available_params):

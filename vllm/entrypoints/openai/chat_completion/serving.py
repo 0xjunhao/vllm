@@ -200,9 +200,10 @@ class OpenAIServingChat(GenerateBaseServing):
     def _apply_override_temperature(
         self, request: ChatCompletionRequest, chat_template_kwargs: dict[str, Any]
     ) -> None:
-        thinking = chat_template_kwargs.get(
-            "enable_thinking"
-        ) or chat_template_kwargs.get("thinking")
+        thinking = (
+            chat_template_kwargs.get("enable_thinking") is not False
+            and chat_template_kwargs.get("thinking") is not False
+        )
         if thinking and self.override_temperature is not None:
             request.temperature = self.override_temperature
 
