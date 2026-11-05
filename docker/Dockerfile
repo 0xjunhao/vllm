@@ -1393,4 +1393,12 @@ RUN --mount=type=cache,target=/opt/uv/cache \
     && uv pip install --python /opt/aiperf/bin/python "agentx-harness==1.0.12" "datasets>=4.7.0" \
     && ln -s /opt/aiperf/bin/aiperf /usr/local/bin/aiperf \
     && aiperf profile --help | grep -q -- --warmup-requests-per-lane
+
+# Kimi Vendor Verifier.
+RUN --mount=type=cache,target=/opt/uv/cache \
+    git clone https://github.com/MoonshotAI/Kimi-Vendor-Verifier.git /opt/kimi-vendor-verifier \
+    && cd /opt/kimi-vendor-verifier \
+    && uv sync --python 3.12 \
+    && uv pip install --python .venv/bin/python -e . \
+    && .venv/bin/python eval.py --help > /dev/null
 #################### UBICLOUD STAGE END ####################
