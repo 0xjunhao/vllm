@@ -83,6 +83,7 @@ from vllm.renderers.chat_utils import (
     ChatTemplateContentFormatOption,
 )
 from vllm.sampling_params import (
+    RepetitionDetectionParams,
     RequestOutputKind,
     SamplingParams,
     StructuredOutputsParams,
@@ -450,6 +451,10 @@ class ResponsesRequest(OpenAIBaseModel):
     stop_token_ids: list[int] | None = []
     ignore_eos: bool = False
     thinking_token_budget: ThinkingTokenBudget = None
+    repetition_detection: RepetitionDetectionParams | None = Field(
+        default=None,
+        description="Parameters for detecting repetitive N-gram for early termination.",
+    )
     vllm_xargs: dict[str, str | int | float | list[str | int | float]] | None = Field(
         default=None,
         description=(
@@ -651,6 +656,11 @@ class ResponsesRequest(OpenAIBaseModel):
                 self.thinking_token_budget
                 if self.thinking_token_budget is not None
                 else default_sampling_params.get("thinking_token_budget")
+            ),
+            repetition_detection=(
+                self.repetition_detection
+                if self.repetition_detection is not None
+                else default_sampling_params.get("repetition_detection")
             ),
             extra_args=extra_args,
             skip_clone=True,  # Created fresh per request, safe to skip clone

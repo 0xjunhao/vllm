@@ -1889,6 +1889,7 @@ class ModelConfig:
             "min_p",
             "max_new_tokens",
             "thinking_token_budget",
+            "repetition_detection",
             "skip_special_tokens",
         ]
         if any(p in config for p in available_params):
@@ -1901,6 +1902,15 @@ class ModelConfig:
                 diff_sampling_param["max_tokens"] = diff_sampling_param.pop(
                     "max_new_tokens"
                 )
+            from pydantic import TypeAdapter
+
+            from vllm.sampling_params import SamplingParams
+
+            for k, v in diff_sampling_param.items():
+                if isinstance(v, dict):
+                    diff_sampling_param[k] = TypeAdapter(
+                        SamplingParams.__annotations__[k]
+                    ).validate_python(v)
         else:
             diff_sampling_param = {}
 

@@ -319,6 +319,7 @@ class CompletionRequest(OpenAIBaseModel):
         "top_k": 0,
         "min_p": 0.0,
         "thinking_token_budget": None,
+        "repetition_detection": None,
     }
 
     def to_beam_search_params(
@@ -431,7 +432,6 @@ class CompletionRequest(OpenAIBaseModel):
             bad_words=self.bad_words,
             extra_args=extra_args or None,
             skip_clone=True,  # Created fresh per request, safe to skip clone
-            repetition_detection=self.repetition_detection,
             routed_experts_prompt_start=self.routed_experts_prompt_start,
         )
 
