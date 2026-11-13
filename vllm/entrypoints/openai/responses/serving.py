@@ -1402,6 +1402,7 @@ class OpenAIServingResponses(GenerateBaseServing):
                 )
             )
 
+            initial_usage_sent = not self.enable_prompt_tokens_details
             try:
                 async for event_data in processor(
                     request,
@@ -1414,6 +1415,32 @@ class OpenAIServingResponses(GenerateBaseServing):
                     created_time,
                     _increment_sequence_number_and_return,
                 ):
+                    assert isinstance(
+                        context, (SimpleContext, HarmonyContext, ParsableContext)
+                    )
+                    if not initial_usage_sent and context.num_prompt_tokens > 0:
+                        usage = ResponseUsage(
+                            input_tokens=context.num_prompt_tokens,
+                            output_tokens=context.num_output_tokens,
+                            total_tokens=context.num_prompt_tokens
+                            + context.num_output_tokens,
+                            input_tokens_details=InputTokensDetails(
+                                cached_tokens=context.num_cached_tokens,
+                                cache_write_tokens=context.num_cache_creation_tokens,
+                            ),
+                            output_tokens_details=OutputTokensDetails(),
+                        )
+                        yield ResponseInProgressEvent(
+                            type="response.in_progress",
+                            sequence_number=event_data.sequence_number,
+                            response={
+                                **initial_response,
+                                "usage": usage.model_dump(mode="json"),
+                            },
+                        )
+                        initial_usage_sent = True
+                        event_data.sequence_number += 1
+                        sequence_number += 1
                     yield event_data
             except GenerationError as e:
                 error_json = self._convert_generation_error_to_streaming_response(e)

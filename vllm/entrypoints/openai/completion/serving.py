@@ -313,8 +313,8 @@ class OpenAIServingCompletion(GenerateBaseServing):
         previous_texts = [""] * num_choices * num_prompts
         has_echoed = [False] * num_choices * num_prompts
         num_prompt_tokens = [0] * num_prompts
-        num_cached_tokens = None
-        first_iteration = True
+        num_cached_tokens: list[int | None] = [None] * num_prompts
+        num_cache_creation_tokens: list[int | None] = [None] * num_prompts
 
         stream_options = request.stream_options
         include_usage, include_continuous_usage = should_include_usage(
@@ -328,9 +328,12 @@ class OpenAIServingCompletion(GenerateBaseServing):
                 prompt_token_ids = res.prompt_token_ids
                 prompt_logprobs = res.prompt_logprobs
 
-                if first_iteration:
-                    num_cached_tokens = res.num_cached_tokens
-                    first_iteration = False
+                if num_cached_tokens[prompt_idx] is None:
+                    num_cached_tokens[prompt_idx] = res.num_cached_tokens
+                if num_cache_creation_tokens[prompt_idx] is None:
+                    num_cache_creation_tokens[prompt_idx] = (
+                        res.num_cache_creation_tokens
+                    )
 
                 prompt_text = res.prompt
                 if prompt_text is None:
@@ -482,6 +485,16 @@ class OpenAIServingCompletion(GenerateBaseServing):
                             completion_tokens=completion_tokens,
                             total_tokens=prompt_tokens + completion_tokens,
                         )
+                        if (
+                            self.enable_prompt_tokens_details
+                            and num_cached_tokens[prompt_idx] is not None
+                        ):
+                            chunk.usage.prompt_tokens_details = PromptTokenUsageInfo(
+                                cached_tokens=num_cached_tokens[prompt_idx],
+                                created_cache_tokens=num_cache_creation_tokens[
+                                    prompt_idx
+                                ],
+                            )
 
                     response_json = chunk.model_dump_json(exclude_unset=True)
                     yield f"data: {response_json}\n\n"
@@ -505,9 +518,12 @@ class OpenAIServingCompletion(GenerateBaseServing):
                 total_tokens=total_prompt_tokens + total_completion_tokens,
             )
 
-            if self.enable_prompt_tokens_details and num_cached_tokens is not None:
+            if self.enable_prompt_tokens_details and any(
+                n is not None for n in num_cached_tokens
+            ):
                 final_usage_info.prompt_tokens_details = PromptTokenUsageInfo(
-                    cached_tokens=num_cached_tokens
+                    cached_tokens=sum(n or 0 for n in num_cached_tokens),
+                    created_cache_tokens=sum(n or 0 for n in num_cache_creation_tokens),
                 )
 
             if include_usage:
